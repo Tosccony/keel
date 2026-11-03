@@ -1,0 +1,12 @@
+# Build output
+/dist/
+
+# Go
+*.test
+*.out
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

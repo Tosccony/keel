@@ -1,0 +1,32 @@
+# nfpm config for the Linux .deb and .rpm packages.
+# VERSION comes from the environment (set by scripts/package-linux.sh).
+# Paths are relative to the repo root.
+name: keel
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: devel
+priority: optional
+maintainer: Kody Verhulp <kody.verhulp@gmail.com>
+vendor: Kody Verhulp
+homepage: https://github.com/Tosccony/keel
+description: |
+  Local web stack (Apache, PHP, MariaDB) with a small control window.
+  Stops the database cleanly instead of killing it.
+
+contents:
+  - src: ./dist/linux/keel
+    dst: /usr/bin/keel
+    file_info:
+      mode: 0755
+  - src: ./packaging/linux/keel.desktop
+    dst: /usr/share/applications/keel.desktop
+
+overrides:
+  deb:
+    depends:
+      - libgl1
+  rpm:
+    depends:
+      - mesa-libGL
