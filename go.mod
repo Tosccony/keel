@@ -6,6 +6,7 @@ require (
 	fyne.io/fyne/v2 v2.8.2
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/shirou/gopsutil/v4 v4.26.9
+	golang.org/x/sys v0.48.0
 )
 
 require (
@@ -47,6 +48,5 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 )

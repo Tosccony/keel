@@ -50,6 +50,10 @@ func (s *Server) Stop(ctx context.Context) (StopResult, error) {
 	began := time.Now()
 	logStart := fileSize(s.LogFile)
 
+	// If Keel crashes from here on, the next start knows a stop was underway.
+	if err := s.setJournal(stateStopping, pid); err != nil {
+		s.progress("Couldn't update Keel's journal: " + err.Error())
+	}
 	s.progress("Asking MariaDB to shut down.")
 	if err := s.askShutdown(ctx); err != nil {
 		s.progress("Couldn't ask over SQL (" + err.Error() + ").")
@@ -100,7 +104,10 @@ func (s *Server) Kill() error {
 		<-s.child.exited
 		s.child = nil
 	}
-	s.progress(fmt.Sprintf("Force-stopped MariaDB (PID %d). The next start will run crash recovery.", pid))
+	if err := s.setJournal(stateKilled, 0); err != nil {
+		s.progress("Couldn't update Keel's journal: " + err.Error())
+	}
+	s.progress(fmt.Sprintf("Force-stopped MariaDB (PID %d). The next start will check it and run recovery.", pid))
 	return nil
 }
 
@@ -194,6 +201,15 @@ func (s *Server) stopped(res StopResult, began time.Time, logStart int64) StopRe
 	if s.child != nil && s.child.cmd.Process.Pid == res.PID {
 		s.child = nil
 	}
+	// Only a stop MariaDB's log confirms counts as clean.
+	state := stateStopped
+	if !res.Confirmed {
+		state = stateUnconfirmed
+	}
+	if err := s.setJournal(state, 0); err != nil {
+		s.progress("Couldn't update Keel's journal: " + err.Error())
+	}
+	s.pruneSnapshots("")
 	s.progress("MariaDB stopped.")
 	return res
 }

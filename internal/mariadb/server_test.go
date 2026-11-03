@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -17,6 +18,14 @@ import (
 // Most of these tests start real MariaDB servers. They need mariadbd and
 // mariadb-install-db on PATH (or KEEL_MARIADB_BIN set to their folder) and
 // are skipped otherwise.
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if template.dir != "" {
+		os.RemoveAll(template.dir)
+	}
+	os.Exit(code)
+}
 
 func TestPortInUse(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -71,6 +80,15 @@ func TestStartIsReadyAndOurs(t *testing.T) {
 	if port != s.Port {
 		t.Errorf("server reports port %d, want %d", port, s.Port)
 	}
+	if s.LastRecovery() != nil {
+		t.Error("a clean start ran recovery")
+	}
+	if dirExists(s.backupDir()) {
+		t.Error("a clean start created a backups folder")
+	}
+	if j, _ := readJournal(s.journalFile()); j.State != stateRunning || j.PID != s.PID() {
+		t.Errorf("journal = %+v, want running with PID %d", j, s.PID())
+	}
 }
 
 func TestStartRefusesBusyPort(t *testing.T) {
@@ -89,13 +107,38 @@ func TestStartRefusesBusyPort(t *testing.T) {
 	if s.PID() != 0 {
 		t.Error("mariadbd was launched even though the port was busy")
 	}
+	if j, _ := readJournal(s.journalFile()); j.State != stateStopped {
+		t.Errorf("a refused start changed the journal to %q", j.State)
+	}
+}
+
+func TestStartRefusesWhenAlreadyRunning(t *testing.T) {
+	s := startTestServer(t)
+	other := sameServer(s)
+	other.Port = freePort(t) // even on a different port, it's the same data folder
+
+	err := other.Start(context.Background())
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("second Start: got %v, want ErrAlreadyRunning", err)
+	}
+	if other.PID() != 0 {
+		t.Error("a second mariadbd was launched on the same data folder")
+	}
+	if j, _ := readJournal(s.journalFile()); j.PID != s.PID() {
+		t.Errorf("journal PID = %d, want %d", j.PID, s.PID())
+	}
 }
 
 func TestStartReportsEarlyExit(t *testing.T) {
 	// An empty data folder passes validation, but mariadbd aborts because
 	// its system tables are missing.
 	s := newTestServer(t)
-	s.DataDir = t.TempDir()
+	if err := os.RemoveAll(s.DataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(s.DataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	err := s.Start(context.Background())
 	if err == nil {
@@ -161,8 +204,14 @@ func TestStopIsClean(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Error("Stop sent no progress messages")
 	}
+	if clean, why := s.LastShutdown(); !clean {
+		t.Errorf("LastShutdown after a clean stop: unclean (%s)", why)
+	}
 	if err := s.Start(context.Background()); err != nil {
-		t.Errorf("Start after Stop: %v", err)
+		t.Fatalf("Start after Stop: %v", err)
+	}
+	if s.LastRecovery() != nil {
+		t.Error("a start after a clean stop ran recovery")
 	}
 }
 
@@ -171,7 +220,7 @@ func TestStopFindsServerStartedElsewhere(t *testing.T) {
 	exited := s.Exited()
 
 	// A second Server with the same settings, like a new keel-lab run.
-	other := &Server{BinDir: s.BinDir, DataDir: s.DataDir, Port: s.Port, Socket: s.Socket, LogFile: s.LogFile}
+	other := sameServer(s)
 	if got := other.RunningPID(); got != s.PID() {
 		t.Fatalf("RunningPID() through the PID file = %d, want %d", got, s.PID())
 	}
@@ -186,6 +235,9 @@ func TestStopFindsServerStartedElsewhere(t *testing.T) {
 	case <-exited:
 	case <-time.After(5 * time.Second):
 		t.Error("the server didn't exit")
+	}
+	if clean, _ := s.LastShutdown(); !clean {
+		t.Error("the first Server doesn't see the clean stop the second one recorded")
 	}
 }
 
@@ -214,29 +266,47 @@ func TestStalePIDFileIsIgnored(t *testing.T) {
 	}
 }
 
-func TestKillThenStartRecovers(t *testing.T) {
-	s := startTestServer(t)
-	if _, err := openDB(t, s).Exec("CREATE DATABASE lab"); err != nil {
+// --- helpers ---
+
+// template is a data folder made once with Init; each test gets a copy,
+// which is much faster than running mariadb-install-db every time.
+var template struct {
+	once sync.Once
+	dir  string // holds data/
+	err  error
+}
+
+// newTestServer returns an unstarted Server with a fresh data folder and a
+// journal that says it stopped cleanly.
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	bin := binDir(t)
+	template.once.Do(func() {
+		template.dir, template.err = os.MkdirTemp("", "keel-template-")
+		if template.err == nil {
+			tpl := &Server{BinDir: bin, DataDir: filepath.Join(template.dir, "data")}
+			template.err = tpl.Init(context.Background())
+		}
+	})
+	if template.err != nil {
+		t.Fatalf("make the template data folder: %v", template.err)
+	}
+
+	dir := t.TempDir()
+	s := &Server{
+		BinDir:  bin,
+		DataDir: filepath.Join(dir, "data"),
+		Port:    freePort(t),
+		Socket:  shortSocketPath(t, dir),
+		LogFile: filepath.Join(dir, "error.log"),
+	}
+	if err := copyTree(filepath.Join(template.dir, "data"), s.DataDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Kill(); err != nil {
-		t.Fatalf("Kill: %v", err)
+	if err := writeJournal(s.journalFile(), journal{State: stateStopped}); err != nil {
+		t.Fatal(err)
 	}
-	if pid := s.RunningPID(); pid != 0 {
-		t.Fatalf("RunningPID() = %d after Kill, want 0", pid)
-	}
-	logStart := fileSize(s.LogFile)
-
-	if err := s.Start(context.Background()); err != nil {
-		t.Fatalf("Start after Kill: %v", err)
-	}
-	if !strings.Contains(strings.Join(readLinesFrom(s.LogFile, logStart), "\n"), "crash") {
-		t.Error("expected crash-recovery lines in the log after a kill")
-	}
-	var name string
-	if err := openDB(t, s).QueryRow("SHOW DATABASES LIKE 'lab'").Scan(&name); err != nil {
-		t.Errorf("database created before the kill is gone: %v", err)
-	}
+	return s
 }
 
 // startTestServer starts a fresh server and stops it when the test ends.
@@ -250,41 +320,26 @@ func startTestServer(t *testing.T) *Server {
 	return s
 }
 
-// newTestServer creates a fresh data folder and returns an unstarted Server.
-func newTestServer(t *testing.T) *Server {
+// sameServer returns a new Server with the same settings, like a second
+// Keel window or a keel-lab run.
+func sameServer(s *Server) *Server {
+	return &Server{BinDir: s.BinDir, DataDir: s.DataDir, Port: s.Port, Socket: s.Socket, LogFile: s.LogFile}
+}
+
+// shortSocketPath keeps socket paths under macOS's limit even when the
+// temporary folder's path is long.
+func shortSocketPath(t *testing.T, dir string) string {
 	t.Helper()
-	bin := binDir(t)
-	dir := t.TempDir()
-	data := filepath.Join(dir, "data")
-
-	install := exec.Command(filepath.Join(bin, "mariadb-install-db"),
-		"--no-defaults",
-		"--basedir="+filepath.Dir(bin),
-		"--datadir="+data,
-		"--auth-root-authentication-method=normal",
-		"--skip-test-db",
-	)
-	if out, err := install.CombinedOutput(); err != nil {
-		t.Fatalf("mariadb-install-db: %v\n%s", err, out)
-	}
-
 	socket := filepath.Join(dir, "s")
-	if len(socket) > maxSocketPath-3 {
-		short, err := os.MkdirTemp("/tmp", "keel-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { os.RemoveAll(short) })
-		socket = filepath.Join(short, "s")
+	if len(socket) <= maxSocketPath-3 {
+		return socket
 	}
-
-	return &Server{
-		BinDir:  bin,
-		DataDir: data,
-		Port:    freePort(t),
-		Socket:  socket,
-		LogFile: filepath.Join(dir, "error.log"),
+	short, err := os.MkdirTemp("/tmp", "keel-")
+	if err != nil {
+		t.Fatal(err)
 	}
+	t.Cleanup(func() { os.RemoveAll(short) })
+	return filepath.Join(short, "s")
 }
 
 // stopForCleanup stops a test server. Tests must not leave servers behind,
@@ -335,4 +390,28 @@ func openDB(t *testing.T, s *Server) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// killOutside force-stops the server the way something outside Keel would
+// (kill -9, Task Manager), without telling the Server or the journal.
+func killOutside(t *testing.T, s *Server) {
+	t.Helper()
+	pid := s.RunningPID()
+	if pid == 0 {
+		t.Fatal("killOutside: server isn't running")
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if ch := s.Exited(); ch != nil {
+		<-ch
+	} else {
+		for isServerFor(pid, s.DataDir) {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 }
