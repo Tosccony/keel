@@ -103,6 +103,8 @@ func (r *boxRenderer) MinSize() fyne.Size {
 func (r *boxRenderer) Refresh() {
 	r.b.paint(r.b.Theme(), currentVariant(), r.bg)
 	r.bg.Refresh()
+	r.Layout(r.b.Size()) // the content may have grown or shrunk
+	r.b.content.Refresh()
 }
 
 func (r *boxRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.bg, r.b.content} }

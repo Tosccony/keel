@@ -70,9 +70,10 @@ You need Go (the version in `go.mod`) and a C compiler, because the window toolk
 Then:
 
 ```sh
-go test ./...                         # tests start real MariaDB servers; skipped if MariaDB isn't installed
+go test -timeout 30m ./...            # tests start real MariaDB servers (skipped if MariaDB isn't installed); a busy machine needs more than the default 10 minutes
 go run ./cmd/keel-lab start           # start MariaDB from ~/personal/keel-lab on port 3307
 go run ./cmd/keel-lab stop            # stop it the clean way (also: init, status, check)
+go run ./cmd/keel-lab repair          # fix damage that stops MariaDB starting (also: backup, backups, restore NAME)
 go run ./cmd/keel                     # run the app
 KEEL_SCREENSHOT=/tmp go test ./cmd/keel -run Screenshot   # pictures of the window, light and dark
 scripts/make-icons.sh                 # rebuild the app icons after changing cmd/keel/icon.svg
@@ -89,7 +90,7 @@ On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel
 | `cmd/keel/` | The Keel window: a card per service with Start/Stop, a warning after an unclean shutdown, and an activity log. `icon.svg` is the logo; `theme.go` holds the light and dark colours |
 | `internal/lab/` | Development setup shared by `keel` and `keel-lab` until MariaDB is bundled. Remembers a port Keel moved to in `keel-settings.json` |
 | `internal/ports/` | Finds free ports, and names the program holding a taken one |
-| `internal/mariadb/` | Starts and stops MariaDB safely, and recovers from unclean shutdowns: a crash journal, a safety copy before recovery, a check of every table, and a lock so two Keels never act on the same data folder at once |
+| `internal/mariadb/` | Starts and stops MariaDB safely, and recovers from unclean shutdowns: a crash journal, a safety copy before recovery, a check of every table, Repair, Back up and Restore, and a lock so two Keels never act on the same data folder at once |
 | `cmd/keel-lab/` | Developer tool for trying the server code against a local MariaDB. Not shipped |
 | `packaging/windows/` | Inno Setup script and icon for the `.exe` installer |
 | `packaging/macos/` | `Info.plist` and icon for `Keel.app` |

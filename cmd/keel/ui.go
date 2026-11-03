@@ -12,7 +12,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
@@ -71,9 +70,10 @@ type ui struct {
 	server *mariadb.Server
 	mu     sync.Mutex
 
-	busy   bool // a start or stop is in progress
-	pidNow int  // the PID last shown; 0 means stopped
-	port   int  // the port shown; the server's Port is only touched under mu
+	busy       bool // a start or stop is in progress
+	pidNow     int  // the PID last shown; 0 means stopped
+	repairMode bool // the running MariaDB was left in repair mode by an interrupted repair
+	port       int  // the port shown; the server's Port is only touched under mu
 
 	// choosePort, if set, runs before each start to move MariaDB off a
 	// port another program holds. It returns a note for the log.
@@ -91,6 +91,7 @@ type ui struct {
 	status  *pill
 	spinner *widget.Activity
 	action  *widget.Button
+	more    *widget.Button // the ⋯ menu: back up, restore, repair, check
 
 	// Shown while stopped after an unclean shutdown.
 	banner     *box
@@ -126,12 +127,14 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 	u.folder.Truncation = fyne.TextTruncateEllipsis
 	u.spinner.Hide()
 	u.action = widget.NewButtonWithIcon("Start", theme.MediaPlayIcon(), u.onAction)
+	u.more = widget.NewButtonWithIcon("", theme.MoreVerticalIcon(), u.showMoreMenu)
+	u.more.Importance = widget.LowImportance
 	u.copyLog = widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), u.copyActivity)
 	u.copyLog.Importance = widget.LowImportance
 
 	u.bannerText = widget.NewLabel("")
 	u.bannerText.Wrapping = fyne.TextWrapWord
-	bannerTitle := widget.NewLabel("The last shutdown wasn't clean")
+	bannerTitle := widget.NewLabel("Keel will check MariaDB on the next start")
 	bannerTitle.TextStyle.Bold = true
 	bannerIcon := widget.NewIcon(warn.icon())
 	u.banner = newBanner(container.NewBorder(nil, nil,
@@ -215,7 +218,8 @@ func (u *ui) mariadbCard() fyne.CanvasObject {
 	right := hstack(8,
 		container.NewCenter(u.spinner),
 		container.NewCenter(u.status),
-		container.NewCenter(u.action))
+		container.NewCenter(u.action),
+		container.NewCenter(u.more))
 	return newCard(container.NewBorder(nil, nil, newTile(theme.StorageIcon()), right, words), 12)
 }
 
@@ -240,12 +244,18 @@ func (u *ui) show(pid int) {
 	u.spinner.Stop()
 	u.spinner.Hide()
 	u.detail.SetText(u.detailText())
-	if pid != 0 {
+	switch {
+	case pid != 0 && u.repairMode:
+		u.status.set("Repair mode", theme.ColorNameWarning)
+		u.action.SetText("Stop")
+		u.action.SetIcon(theme.MediaStopIcon())
+		u.action.Importance = widget.HighImportance
+	case pid != 0:
 		u.status.set("Running", theme.ColorNameSuccess)
 		u.action.SetText("Stop")
 		u.action.SetIcon(theme.MediaStopIcon())
 		u.action.Importance = widget.MediumImportance
-	} else {
+	default:
 		u.status.set("Stopped", "")
 		u.action.SetText("Start")
 		u.action.SetIcon(theme.MediaPlayIcon())
@@ -253,6 +263,7 @@ func (u *ui) show(pid int) {
 	}
 	u.action.Enable()
 	u.action.Refresh()
+	u.more.Enable()
 }
 
 // detailText is the line under MariaDB's name: its port, and its PID while
@@ -281,6 +292,7 @@ func (u *ui) showBusy(text string) {
 	u.action.SetText(text)
 	u.action.SetIcon(nil)
 	u.action.Disable()
+	u.more.Disable()
 }
 
 func (u *ui) onAction() {
@@ -317,7 +329,11 @@ type startResult struct {
 func (u *ui) runStart(withoutCopy bool) startResult {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	ctx := context.Background()
+	return u.startLocked(context.Background(), withoutCopy)
+}
+
+// startLocked is runStart for callers that already hold mu.
+func (u *ui) startLocked(ctx context.Context, withoutCopy bool) startResult {
 	var err error
 	if u.choosePort != nil {
 		var note string
@@ -354,6 +370,9 @@ func (u *ui) finishStart(r startResult) {
 		u.log(info, "MariaDB is already running.")
 	case errors.Is(err, mariadb.ErrSnapshotFailed):
 		u.confirmStartWithoutCopy(err)
+	case errors.Is(err, mariadb.ErrExitedDuringStartup):
+		u.log(bad, "MariaDB quit while starting: "+startErrorLine(err))
+		u.askRepair("MariaDB couldn't start", "MariaDB quit while starting:\n"+startErrorLine(err))
 	default:
 		msg := err.Error()
 		if errors.Is(err, mariadb.ErrPortInUse) {
@@ -361,7 +380,7 @@ func (u *ui) finishStart(r startResult) {
 		}
 		first, _, _ := strings.Cut(msg, "\n")
 		u.log(bad, "Couldn't start: "+strings.TrimPrefix(first, "mariadb: "))
-		dialog.ShowError(errors.New(msg), u.win)
+		u.inform("MariaDB couldn't start", strings.TrimPrefix(msg, "mariadb: "))
 	}
 }
 
@@ -369,7 +388,7 @@ func (u *ui) finishStart(r startResult) {
 func (u *ui) showRecovery(rec *mariadb.Recovery) {
 	var b strings.Builder
 	b.WriteString(rec.Reason + "\n\n")
-	title := "Recovered from an unclean shutdown"
+	title := "Recovery finished"
 	switch {
 	case rec.CheckErr != nil:
 		title = "Recovered, but the tables weren't checked"
@@ -377,39 +396,29 @@ func (u *ui) showRecovery(rec *mariadb.Recovery) {
 	case len(rec.Problems) == 0:
 		fmt.Fprintf(&b, "MariaDB recovered, and all %d tables passed their check.", rec.Checked)
 	default:
-		title = "Some tables need attention"
-		fmt.Fprintf(&b, "MariaDB started, but %d of %d tables have problems:\n", len(rec.Problems), rec.Checked)
-		for i, p := range rec.Problems {
-			if i == 10 {
-				fmt.Fprintf(&b, "…and %d more (see the activity log)\n", len(rec.Problems)-10)
-				break
-			}
-			fmt.Fprintf(&b, "• %s: %s\n", p.Table, p.Message)
-		}
+		// The server already logged each problem; offer to fix them.
+		u.askRepair("Some tables need attention", repairPrompt(rec))
+		return
 	}
 	if rec.Snapshot != "" {
 		b.WriteString("\n\nA copy of the data from before recovery is in:\n" + rec.Snapshot)
 	}
-	dialog.ShowInformation(title, b.String(), u.win)
+	u.inform(title, b.String())
 }
 
 // confirmStartWithoutCopy asks before letting MariaDB recover with no copy
 // to fall back on.
 func (u *ui) confirmStartWithoutCopy(err error) {
 	u.log(warn, "Didn't start: Keel couldn't save a safety copy first.")
-	d := dialog.NewConfirm("Start without a safety copy?",
+	u.ask("Start without a safety copy?",
 		strings.TrimPrefix(err.Error(), "mariadb: ")+"\n\n"+
-			"The last shutdown wasn't clean, so MariaDB will run crash recovery.\n"+
+			"The last shutdown wasn't clean, so MariaDB will run crash recovery. "+
 			"Starting anyway means there's no copy to go back to if recovery goes wrong.",
-		func(ok bool) {
+		"Start anyway", "Don't start", widget.DangerImportance, func(ok bool) {
 			if ok {
 				u.start(true)
 			}
-		}, u.win)
-	d.SetConfirmText("Start anyway")
-	d.SetDismissText("Don't start")
-	d.SetConfirmImportance(widget.DangerImportance)
-	d.Show()
+		})
 }
 
 func (u *ui) stop() {
@@ -452,11 +461,11 @@ func (u *ui) stop() {
 
 // confirmKill asks before the one hard kill Keel allows.
 func (u *ui) confirmKill() {
-	d := dialog.NewConfirm("Force-stop MariaDB?",
+	u.ask("Force-stop MariaDB?",
 		"MariaDB is still running after two requests to shut down.\n\n"+
-			"Force-stopping it is the hard kill that corrupts XAMPP databases.\n"+
+			"Force-stopping it is the hard kill that corrupts XAMPP databases. "+
 			"The next start will run crash recovery.",
-		func(ok bool) {
+		"Force-stop", "Keep running", widget.DangerImportance, func(ok bool) {
 			if !ok {
 				u.log(info, "Left MariaDB running.")
 				return
@@ -469,11 +478,7 @@ func (u *ui) confirmKill() {
 				u.mu.Unlock()
 				fyne.Do(func() { u.finishKill(err) })
 			}()
-		}, u.win)
-	d.SetConfirmText("Force-stop")
-	d.SetDismissText("Keep running")
-	d.SetConfirmImportance(widget.DangerImportance)
-	d.Show()
+		})
 }
 
 // finishKill shows how a force-stop went. On success the server's own
@@ -503,10 +508,27 @@ func (u *ui) checkNow() {
 			return // a start or stop is running; it will report the result
 		}
 		pid := u.server.RunningPID()
+		repairMode := pid != 0 && u.server.InRepairMode(pid)
 		u.mu.Unlock()
 		clean, why := u.server.LastShutdown() // reads files only; safe without the lock
-		fyne.Do(func() { u.applyCheck(pid, clean, why) })
+		fyne.Do(func() {
+			u.noteRepairMode(repairMode)
+			u.applyCheck(pid, clean, why)
+		})
 	}()
+}
+
+// noteRepairMode records whether MariaDB is stuck in repair mode, and says
+// so once when it's first noticed.
+func (u *ui) noteRepairMode(on bool) {
+	if u.busy || on == u.repairMode {
+		return
+	}
+	u.repairMode = on
+	if on {
+		u.log(warn, "MariaDB is still in repair mode, without account checks, because a repair was interrupted. Stop it, then start it again.")
+	}
+	u.show(u.pidNow)
 }
 
 // applyCheck shows the result of a background check: whether MariaDB is
@@ -527,7 +549,7 @@ func (u *ui) applyCheck(pid int, clean bool, why string) {
 		u.show(pid)
 	}
 	if !clean && pid == 0 && why != u.lastWhy {
-		u.log(warn, "The last shutdown wasn't clean: "+why)
+		u.log(warn, "The next start will check MariaDB: "+why)
 	}
 	u.lastWhy = why
 	u.showShutdown(pid, clean, why)
@@ -538,7 +560,7 @@ func (u *ui) applyCheck(pid int, clean bool, why string) {
 func (u *ui) showShutdown(pid int, clean bool, why string) {
 	stopped := pid == 0
 	if stopped && !clean {
-		u.bannerText.SetText(why + " Keel will save a copy of the data folder and check every table the next time MariaDB starts.")
+		u.bannerText.SetText(why + " Before MariaDB opens its data, Keel makes sure there's a copy to fall back on, then checks every table.")
 		u.banner.Show()
 	} else {
 		u.banner.Hide()
@@ -625,4 +647,21 @@ func progressLevel(msg string) level {
 		return good
 	}
 	return info
+}
+
+// repairPrompt describes the damage a recovery found, for the repair offer.
+func repairPrompt(rec *mariadb.Recovery) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\nMariaDB started, but %d of %d tables have problems:\n", rec.Reason, len(rec.Problems), rec.Checked)
+	for i, p := range rec.Problems {
+		if i == 8 {
+			fmt.Fprintf(&b, "…and %d more (see the activity log)\n", len(rec.Problems)-8)
+			break
+		}
+		fmt.Fprintf(&b, "• %s: %s\n", p.Table, p.Message)
+	}
+	if rec.Snapshot != "" {
+		fmt.Fprintf(&b, "\nA copy of the data from before recovery is in:\n%s", rec.Snapshot)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

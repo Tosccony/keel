@@ -88,7 +88,7 @@ cost a damaged database.
 | 47 | Missing data folder or over-long socket path: refused with a plain message | `TestStartCatchesSetupMistakes` |
 | 48 | MariaDB exits during startup: error quotes its log | `TestStartReportsEarlyExit` |
 | 49 | Start gives up waiting: server keeps running | `TestCancelledStartLeavesServerRunning` |
-| 50 | SQL unreachable: Stop falls back to SIGTERM, still clean | `TestStopNudgesWhenSQLUnreachable` |
+| 50 | Root has a password, so SQL SHUTDOWN is refused: Stop falls back to SIGTERM, still clean | `TestStopNudgesWhenSQLIsRefused` |
 | 51 | Frozen server: Stop gives up but **never kills** | `TestStopNeverKills` |
 | 52 | Stale PID file pointing at another program: ignored by Stop and Kill | `TestStalePIDFileIsIgnored` |
 | 53 | Nothing running: Stop says so | `TestStopWhenNotRunning` |
@@ -133,27 +133,61 @@ Two Keels (two windows, or a window and keel-lab) must never start, stop or reco
 | 75 | The choice can't be saved: MariaDB still moves, with a warning. A broken settings file is ignored | `TestChoosePortStillMovesWhenSettingsCantBeSaved`, `TestBrokenSettingsFileIsIgnored` |
 | 76 | The window shows the new port and why; no free port stops the start with a clear message | `TestStartMovesPortAndSaysWhy`, `TestNoFreePortStopsTheStart` |
 
+### Repair
+
+Repair works even when MariaDB won't start. These cases use real MariaDB and the exact damage behind XAMPP's best-known errors.
+
+| # | Case | Test |
+|---|---|---|
+| 77 | `mysql.global_priv` (the accounts) has a wiped index header: MariaDB quits with "Can't open and lock privilege tables". Repair fixes it in repair mode; root can log in; all tables pass | `TestRepairFixesDamagedAccountsTable` |
+| 78 | Aria's control file is garbage: MariaDB quits with "Unknown storage engine 'Aria'". Repair rebuilds Aria's log files and zerofills every Aria table | `TestRepairRebuildsDamagedAriaLog` |
+| 79 | A MyISAM table's index is damaged: repaired with its rows intact. An InnoDB table's file is missing: reported as needing a restore, not "repaired" | `TestRepairFixesMyISAMAndReportsInnoDB` |
+| 80 | Nothing is wrong: Repair says so, and leaves the last shutdown clean | `TestRepairWithNothingWrong` |
+| 81 | The copy Repair saves first holds the data exactly as it was, damage included | `TestRepairFixesDamagedAccountsTable`, `TestRepairRebuildsDamagedAriaLog` |
+| 82 | Repair, Back up and Restore refuse while MariaDB runs, and leave nothing behind | `TestRepairBackUpAndRestoreNeedMariaDBStopped` |
+| 83 | Aria log damage is recognised from MariaDB's own error lines | `TestAriaLogDamaged` |
+| 84 | Stop reaches the server on the port it really runs on, even if Keel's setting changed since (on Windows a wrong port meant a force-stop) | `TestStopUsesTheServersRealPort` |
+| 85 | A start that dies offers Repair, quoting MariaDB's "Fatal error" line | `TestStartFailureOffersRepair`, `TestStartErrorLine` |
+| 86 | The repair summary: repaired, nothing to do, damage left, didn't finish | `TestRepairSummary` |
+
+### Back up and restore
+
+| # | Case | Test |
+|---|---|---|
+| 87 | Back up, change a row, restore: the row is back; the next start recovers and checks, using the backup as its fallback instead of copying again | `TestBackUpAndRestoreWithMariaDB` |
+| 88 | Restore saves the current data first; restoring that copy undoes the restore; no temporary folders are left | `TestRestoreSwapsAndCanBeUndone` |
+| 89 | Restore when the data folder is missing | `TestRestoreIntoMissingDataFolder` |
+| 90 | Restore refuses folders outside the backups folder, unfinished copies, and folders that aren't MariaDB data, and changes nothing | `TestRestoreRejectsBadCopies` |
+| 91 | Keel dies between the restore's two renames: the next start says where the old data is | `TestInterruptedRestoreIsExplained` |
+| 92 | The copies are listed newest first with their kind; unfinished copies and other folders are left out | `TestBackupsListsNewestFirst` |
+| 93 | The user's own backups are never pruned; Keel's own copies are pruned after a week, keeping the newest of each kind | `TestPruneNeverDeletesTheUsersBackups` |
+| 94 | The restore list gives every copy a different label | `TestBackupLabelsAreUnique` |
+| 95 | The ⋯ menu follows the state: Check only while running, everything off while busy | `TestMoreMenuFollowsState` |
+| 96 | Back up, Restore and Repair report their result and put the card back | `TestMaintenanceRunsWorkThenReports` |
+
 ## Still to cover
 
 These need real hardware, features that aren't built yet, or a longer run.
 
 | # | Case | Why it matters | Blocked on |
 |---|---|---|---|
-| 77 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
-| 78 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
-| 79 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
-| 80 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
-| 81 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
-| 82 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
-| 83 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
-| 84 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
-| 85 | Damaged Aria system tables (`mysql.global_priv`), the exact XAMPP error | Needs the repair flow | Repair and restore buttons |
-| 86 | Restoring from a safety copy | Needs the restore feature | Restore button |
-| 87 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
-| 88 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
-| 89 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
-| 90 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
-| 91 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
-| 92 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Manual test |
-| 93 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
-| 94 | A port held by another user's program or a system service (XAMPP's MySQL installed as a Windows service) | Windows names it; macOS and Linux can only say "another program" without admin rights | Windows support |
+| 97 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
+| 98 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
+| 99 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
+| 100 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
+| 101 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
+| 102 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
+| 103 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
+| 104 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
+| 105 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
+| 106 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
+| 107 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
+| 108 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
+| 109 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
+| 110 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Manual test |
+| 111 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
+| 112 | A port held by another user's program or a system service (XAMPP's MySQL installed as a Windows service) | Windows names it; macOS and Linux can only say "another program" without admin rights | Windows support |
+| 113 | InnoDB damage that stops MariaDB starting at all | Repair can't fix InnoDB in place; the answer is a restore, or innodb_force_recovery and a dump | Manual test |
+| 114 | Keel killed while repair mode is running | MariaDB keeps running without account checks until stopped; the window should say so | Add an automated test |
+| 115 | Repair on Windows (aria_chk.exe, Windows paths) | The XAMPP errors are mostly seen on Windows | Windows support |
+| 116 | Root has a password on **Windows** | No SIGTERM there, so Stop can't shut MariaDB down and ends at the force-stop prompt. Needs Keel's own admin account or a named-pipe login | Windows support |

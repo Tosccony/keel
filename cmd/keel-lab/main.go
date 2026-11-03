@@ -6,6 +6,10 @@
 //	go run ./cmd/keel-lab status   # is it running, and did it last stop cleanly?
 //	go run ./cmd/keel-lab check    # run CHECK TABLE on every table
 //	go run ./cmd/keel-lab stop     # stop it the clean way
+//	go run ./cmd/keel-lab repair   # fix damage that stops MariaDB starting (stopped only)
+//	go run ./cmd/keel-lab backup   # save a copy of the data folder (stopped only)
+//	go run ./cmd/keel-lab backups  # list the copies
+//	go run ./cmd/keel-lab restore NAME  # put a copy back (stopped only)
 //
 // The server keeps running after keel-lab exits, the same way it keeps
 // running after Keel's window closes.
@@ -18,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,7 +34,7 @@ func main() {
 	opts := lab.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] init|start|status|check|stop")
+		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] init|start|status|check|stop|repair|backup|backups|restore NAME")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -71,10 +76,83 @@ func main() {
 			fmt.Printf("  %s: %s\n", p.Table, p.Message)
 		}
 		os.Exit(1)
+	case "repair":
+		repair(ctx, s)
+	case "backup":
+		if _, err := s.BackUp(); err != nil {
+			fail(err)
+		}
+	case "backups":
+		listBackups(s)
+	case "restore":
+		restore(s, flag.Arg(1))
 	default:
 		flag.Usage()
 		os.Exit(2)
 	}
+}
+
+func repair(ctx context.Context, s *mariadb.Server) {
+	rep, err := s.Repair(ctx)
+	if err != nil {
+		fail(err)
+	}
+	if rep.AriaReset {
+		fmt.Println("Rebuilt Aria's damaged log files.")
+	}
+	for _, t := range rep.Repaired {
+		fmt.Println("Repaired", t)
+	}
+	for _, p := range rep.Remaining {
+		fmt.Printf("Still damaged: %s: %s\n", p.Table, p.Message)
+	}
+	fmt.Println("The copy from before the repair is in", rep.Copy)
+	if len(rep.Remaining) > 0 {
+		os.Exit(1)
+	}
+}
+
+func listBackups(s *mariadb.Server) {
+	list, err := s.Backups()
+	if err != nil {
+		fail(err)
+	}
+	if len(list) == 0 {
+		fmt.Println("No copies yet.")
+		return
+	}
+	for _, b := range list {
+		size := "?"
+		if n, err := b.Size(); err == nil {
+			size = fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+		}
+		fmt.Printf("%-34s  %-16s  %s  %9s\n", b.Name(), b.Kind.Label(), b.Taken.Format("2 Jan 2006 15:04"), size)
+	}
+}
+
+func restore(s *mariadb.Server, name string) {
+	list, err := s.Backups()
+	if err != nil {
+		fail(err)
+	}
+	for _, b := range list {
+		if b.Name() != name {
+			continue
+		}
+		if !ask(fmt.Sprintf("Replace the data folder with %s? Keel saves the current data first.", name)) {
+			fmt.Println("Didn't restore.")
+			return
+		}
+		saved, err := s.Restore(b)
+		if err != nil {
+			fail(err)
+		}
+		if saved != "" {
+			fmt.Println("To undo: keel-lab restore", filepath.Base(saved))
+		}
+		return
+	}
+	fail(fmt.Errorf("no copy called %q; see keel-lab backups", name))
 }
 
 func start(ctx context.Context, opts lab.Options, s *mariadb.Server) {
@@ -99,6 +177,11 @@ func start(ctx context.Context, opts lab.Options, s *mariadb.Server) {
 		}
 		began = time.Now()
 		err = s.StartWithoutSnapshot(ctx)
+	}
+	if errors.Is(err, mariadb.ErrExitedDuringStartup) {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		fmt.Fprintln(os.Stderr, "MariaDB couldn't start. To fix the damage: keel-lab repair")
+		os.Exit(1)
 	}
 	if err != nil {
 		fail(err)

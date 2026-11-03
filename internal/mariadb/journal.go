@@ -19,6 +19,9 @@ const (
 	stateStopping    = "stopping"    // a stop was in progress
 	stateKilled      = "killed"      // force-stopped with Kill
 	stateUnconfirmed = "unconfirmed" // exited after a stop request, but the log didn't confirm it
+	stateRepairing   = "repairing"   // Repair was running MariaDB in repair mode
+	stateRestoring   = "restoring"   // Restore was swapping the data folder for a copy
+	stateRestored    = "restored"    // a copy was restored and hasn't been started since
 )
 
 // journal is Keel's record of how MariaDB last stopped. It lives next to
@@ -176,6 +179,12 @@ func needsRecovery(j journal, jerr error, ev logEvidence) (bool, string) {
 		return true, "MariaDB was force-stopped."
 	case stateUnconfirmed:
 		return true, "The last stop wasn't confirmed in MariaDB's log."
+	case stateRepairing:
+		return true, "A repair was interrupted."
+	case stateRestoring:
+		return true, "A restore was interrupted."
+	case stateRestored:
+		return true, "The data was just restored from a copy."
 	default:
 		return true, fmt.Sprintf("Keel's record of the last shutdown has an unknown state (%q).", j.State)
 	}

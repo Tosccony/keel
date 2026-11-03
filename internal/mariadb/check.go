@@ -9,7 +9,10 @@ import (
 
 // TableProblem is a table that failed CHECK TABLE.
 type TableProblem struct {
-	Table   string // database.table
+	Table   string // database.table, for people
+	Schema  string // the database
+	Name    string // the table
+	Engine  string // InnoDB, Aria, MyISAM...; empty if MariaDB couldn't say
 	Message string
 }
 
@@ -25,21 +28,22 @@ func (s *Server) CheckTables(ctx context.Context) (checked int, problems []Table
 	db.SetMaxOpenConns(1)
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT table_schema, table_name FROM information_schema.tables
+		SELECT table_schema, table_name, IFNULL(engine, '') FROM information_schema.tables
 		WHERE table_type = 'BASE TABLE'
 		  AND table_schema NOT IN ('information_schema', 'performance_schema', 'sys')
 		ORDER BY table_schema, table_name`)
 	if err != nil {
 		return 0, nil, fmt.Errorf("mariadb: list tables: %w", err)
 	}
-	var tables [][2]string
+	var tables []TableProblem
 	for rows.Next() {
-		var schema, name string
-		if err := rows.Scan(&schema, &name); err != nil {
+		var t TableProblem
+		if err := rows.Scan(&t.Schema, &t.Name, &t.Engine); err != nil {
 			rows.Close()
 			return 0, nil, err
 		}
-		tables = append(tables, [2]string{schema, name})
+		t.Table = t.Schema + "." + t.Name
+		tables = append(tables, t)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -47,13 +51,14 @@ func (s *Server) CheckTables(ctx context.Context) (checked int, problems []Table
 	}
 
 	for _, t := range tables {
-		msg, err := checkTable(ctx, db, t[0], t[1])
+		msg, err := checkTable(ctx, db, t.Schema, t.Name)
 		if err != nil {
 			msg = err.Error()
 		}
 		checked++
 		if msg != "" {
-			problems = append(problems, TableProblem{Table: t[0] + "." + t[1], Message: msg})
+			t.Message = msg
+			problems = append(problems, t)
 		}
 	}
 	return checked, problems, nil

@@ -24,6 +24,6 @@ func detach(cmd *exec.Cmd) {
 
 // nudge asks again over SQL. Windows has no SIGTERM, and the console-control
 // events it does have would also reach Keel.
-func (s *Server) nudge(ctx context.Context, _ int) error {
-	return s.askShutdown(ctx)
+func (s *Server) nudge(ctx context.Context, pid int) error {
+	return s.askShutdown(ctx, pid)
 }

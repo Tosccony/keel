@@ -12,8 +12,14 @@ import (
 	"time"
 )
 
+// Copies in BackupDir are named <prefix><time>, like
+// pre-recovery-2026-11-03-121500.
 const (
-	snapshotPrefix = "pre-recovery-"
+	snapshotPrefix   = "pre-recovery-" // made by Start before crash recovery
+	backupPrefix     = "backup-"       // made by BackUp, when the user asks
+	preRestorePrefix = "pre-restore-"  // made by Restore, so a restore can be undone
+	preRepairPrefix  = "pre-repair-"   // made by Repair before it changes anything
+
 	snapshotLayout = "2006-01-02-150405"
 	snapshotKeep   = 7 * 24 * time.Hour
 	// snapshotMargin is free space to leave on top of the copy itself, so
@@ -36,44 +42,58 @@ func (s *Server) backupDir() string {
 	return filepath.Join(filepath.Dir(s.DataDir), "backups")
 }
 
-// snapshot copies the data folder to BackupDir/pre-recovery-<time> and
-// returns the copy's path. MariaDB must not be running.
-//
-// The copy is made under a ".partial" name and renamed when complete, so an
-// interrupted copy is never mistaken for a good one.
-func (s *Server) snapshot() (string, error) {
+// snapshot saves the copy Start makes before crash recovery.
+func (s *Server) snapshot() (string, error) { return s.saveCopy(snapshotPrefix) }
+
+// saveCopy copies the data folder to BackupDir/<prefix><time> and returns
+// the copy's path. MariaDB must not be running.
+func (s *Server) saveCopy(prefix string) (string, error) {
 	dir := s.backupDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	dst := uniquePath(filepath.Join(dir, snapshotPrefix+time.Now().Format(snapshotLayout)))
+	dst := uniquePath(filepath.Join(dir, prefix+time.Now().Format(snapshotLayout)))
+	if err := copyDataDir(s.DataDir, dst); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
+// copyDataDir copies a data folder to dst, which must not exist: an
+// instant copy-on-write clone where the file system allows, otherwise a
+// plain copy after checking there's room for it.
+//
+// The copy is made under a ".partial" name and renamed when complete, so an
+// interrupted copy is never mistaken for a good one.
+func copyDataDir(src, dst string) error {
+	parent := filepath.Dir(dst)
 	tmp := dst + ".partial"
 	os.RemoveAll(tmp)
 
-	if err := cloneDir(s.DataDir, tmp); err != nil {
+	if err := cloneDir(src, tmp); err != nil {
 		os.RemoveAll(tmp)
-		size, err := dirSize(s.DataDir)
+		size, err := dirSize(src)
 		if err != nil {
-			return "", err
+			return err
 		}
-		free, err := freeSpace(dir)
+		free, err := freeSpace(parent)
 		if err != nil {
-			return "", fmt.Errorf("check free space: %w", err)
+			return fmt.Errorf("check free space: %w", err)
 		}
 		if need := uint64(size) + snapshotMargin; free < need {
-			return "", fmt.Errorf("not enough free space in %s: the copy needs %s and %s is free", dir, humanBytes(need), humanBytes(free))
+			return fmt.Errorf("not enough free space in %s: the copy needs %s and %s is free", parent, humanBytes(need), humanBytes(free))
 		}
-		if err := copyTree(s.DataDir, tmp); err != nil {
+		if err := copyTree(src, tmp); err != nil {
 			os.RemoveAll(tmp)
-			return "", err
+			return err
 		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		os.RemoveAll(tmp)
-		return "", err
+		return err
 	}
-	syncDir(dir)
-	return dst, nil
+	syncDir(parent)
+	return nil
 }
 
 // uniquePath adds -2, -3, ... if path already exists.
@@ -167,19 +187,22 @@ func dirSize(root string) (int64, error) {
 	return total, err
 }
 
-// pruneSnapshots deletes pre-recovery copies older than a week, and
-// ".partial" copies abandoned more than an hour ago. It always keeps the
-// newest copy and the one passed as keep (the journal's).
+// pruneSnapshots deletes the copies Keel made by itself (before recovery,
+// restore or repair) once they're more than a week old, keeping the newest
+// of each kind and the one passed as keep (the journal's). Copies made
+// with BackUp are the user's, and are never deleted. ".partial" copies
+// abandoned more than an hour ago are deleted whatever their kind.
 func (s *Server) pruneSnapshots(keep string) {
 	dir := s.backupDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	var snaps []string
+	byKind := map[BackupKind][]string{}
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() || !strings.HasPrefix(name, snapshotPrefix) {
+		kind := kindOf(name)
+		if !e.IsDir() || kind == "" {
 			continue
 		}
 		if strings.HasSuffix(name, ".partial") {
@@ -188,23 +211,31 @@ func (s *Server) pruneSnapshots(keep string) {
 			}
 			continue
 		}
-		snaps = append(snaps, name)
-	}
-	sort.Strings(snaps) // names start with a sortable timestamp
-	for i, name := range snaps {
-		path := filepath.Join(dir, name)
-		if i == len(snaps)-1 || (keep != "" && sameDir(path, keep)) {
-			continue
+		if kind != Manual {
+			byKind[kind] = append(byKind[kind], name)
 		}
-		if taken, ok := snapshotTime(name); ok && time.Since(taken) > snapshotKeep {
-			os.RemoveAll(path)
+	}
+	for _, names := range byKind {
+		sort.Strings(names) // names end in a sortable timestamp
+		for i, name := range names {
+			path := filepath.Join(dir, name)
+			if i == len(names)-1 || (keep != "" && sameDir(path, keep)) {
+				continue
+			}
+			if taken, ok := snapshotTime(name); ok && time.Since(taken) > snapshotKeep {
+				os.RemoveAll(path)
+			}
 		}
 	}
 }
 
 // snapshotTime reads the time from a name like pre-recovery-2026-11-03-111652-2.
 func snapshotTime(name string) (time.Time, bool) {
-	stamp := strings.TrimPrefix(name, snapshotPrefix)
+	kind := kindOf(name)
+	if kind == "" {
+		return time.Time{}, false
+	}
+	stamp := strings.TrimPrefix(name, string(kind)+"-")
 	if len(stamp) < len(snapshotLayout) {
 		return time.Time{}, false
 	}

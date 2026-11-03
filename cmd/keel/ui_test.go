@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
@@ -86,7 +87,7 @@ func TestShutdownStatusIsShown(t *testing.T) {
 		t.Errorf("unclean: banner %q (shown %v), status bar shown %v", u.bannerText.Text, u.banner.Visible(), u.shutdown.Visible())
 	}
 	u.applyCheck(0, false, "MariaDB was force-stopped.") // same reason again
-	if n := countContaining(u.logLines(), "wasn't clean"); n != 1 {
+	if n := countContaining(u.logLines(), "next start will check MariaDB"); n != 1 {
 		t.Errorf("the unclean reason was logged %d times, want once: %q", n, u.logLines())
 	}
 
@@ -242,6 +243,150 @@ func TestFailedForceStopRestoresTheCard(t *testing.T) {
 	}
 }
 
+func TestMoreMenuFollowsState(t *testing.T) {
+	u, _ := newTestUI(t)
+	enabled := func() map[string]bool {
+		m := map[string]bool{}
+		for _, it := range u.moreMenu().Items {
+			if !it.IsSeparator {
+				m[it.Label] = !it.Disabled
+			}
+		}
+		return m
+	}
+	stopped := enabled()
+	if !stopped["Back up now"] || !stopped["Restore a copy…"] || !stopped["Repair…"] || stopped["Check tables"] || !stopped["Open backups folder"] {
+		t.Errorf("stopped: %v", stopped)
+	}
+	u.show(42)
+	if running := enabled(); !running["Check tables"] || !running["Back up now"] {
+		t.Errorf("running: %v", running)
+	}
+	u.busy = true
+	u.showBusy("Starting…")
+	busy := enabled()
+	for _, label := range []string{"Back up now", "Restore a copy…", "Repair…", "Check tables"} {
+		if busy[label] {
+			t.Errorf("%q should be disabled while busy", label)
+		}
+	}
+	if !u.more.Disabled() {
+		t.Error("the ⋯ button should be disabled while busy")
+	}
+}
+
+func TestRepairModeIsShown(t *testing.T) {
+	u, _ := newTestUI(t)
+	u.show(77)
+	u.noteRepairMode(true)
+	u.noteRepairMode(true) // noticed again on the next check
+	if u.status.Text != "Repair mode" || u.action.Text != "Stop" {
+		t.Errorf("status %q, action %q", u.status.Text, u.action.Text)
+	}
+	if n := countContaining(u.logLines(), "still in repair mode"); n != 1 {
+		t.Errorf("logged %d times, want once: %q", n, u.logLines())
+	}
+	u.noteRepairMode(false)
+	if u.status.Text != "Running" {
+		t.Errorf("after repair mode ended: %q", u.status.Text)
+	}
+}
+
+func TestStartFailureOffersRepair(t *testing.T) {
+	u, w := newTestUI(t)
+	err := fmt.Errorf("mariadb: %w (exit status 1)\nlast lines of mariadb.log:\n"+
+		"2026-11-03 14:39:12 0 [Note] Server socket created on IP: '127.0.0.1', port: '3307'.\n"+
+		"2026-11-03 14:39:12 0 [ERROR] Fatal error: Can't open and lock privilege tables: Incorrect file format 'global_priv'\n"+
+		"2026-11-03 14:39:12 0 [ERROR] Aborting", mariadb.ErrExitedDuringStartup)
+	u.finishStart(startResult{port: 3307, err: err})
+	if w.Canvas().Overlays().Top() == nil {
+		t.Error("a failed start should open the repair offer")
+	}
+	if countContaining(u.logLines(), "MariaDB quit while starting: Fatal error: Can't open and lock privilege tables") != 1 {
+		t.Errorf("log = %q", u.logLines())
+	}
+}
+
+func TestStartErrorLine(t *testing.T) {
+	for msg, want := range map[string]string{
+		"x\n2026 [ERROR] Plugin 'Aria' registration failed.\n2026 [ERROR] Aborting":       "Plugin 'Aria' registration failed.",
+		"x\n2026 [ERROR] Aborting\n2026 [ERROR] Fatal error: Can't open privilege tables": "Fatal error: Can't open privilege tables",
+		"mariadb: server exited during startup (signal: killed)":                          "",
+	} {
+		if got := startErrorLine(errors.New(msg)); got != want {
+			t.Errorf("startErrorLine(%q) = %q, want %q", msg, got, want)
+		}
+	}
+}
+
+func TestRepairSummary(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		rep       *mariadb.RepairReport
+		err       error
+		title     string
+		wantParts []string
+	}{
+		{"fixed", &mariadb.RepairReport{Copy: "/b/pre-repair-x", Repaired: []string{"mysql.global_priv"}, Checked: 30},
+			nil, "Repaired", []string{"Repaired mysql.global_priv.", "All 30 tables pass", "/b/pre-repair-x"}},
+		{"aria", &mariadb.RepairReport{AriaReset: true, Checked: 30}, nil, "Repaired", []string{"Rebuilt Aria's damaged log files."}},
+		{"nothing", &mariadb.RepairReport{Checked: 30}, nil, "Nothing needed repairing", []string{"All 30 tables pass"}},
+		{"left", &mariadb.RepairReport{Remaining: []mariadb.TableProblem{{Table: "shop.orders", Message: "missing (InnoDB tables can't be repaired in place; restore a copy from before the damage)"}}},
+			nil, "Some damage is left", []string{"Still damaged:", "• shop.orders: missing", "restore a copy"}},
+		{"failed", &mariadb.RepairReport{Copy: "/b/pre-repair-y"}, errors.New("mariadb: MariaDB couldn't start even in repair mode\nlog lines"),
+			"The repair didn't finish", []string{"couldn't start even in repair mode", "/b/pre-repair-y"}},
+		{"refused", nil, errors.New("mariadb: another Keel is starting or stopping this MariaDB right now"), "The repair didn't finish", []string{"another Keel"}},
+	} {
+		title, body := repairSummary(tt.rep, tt.err)
+		if title != tt.title {
+			t.Errorf("%s: title %q, want %q", tt.name, title, tt.title)
+		}
+		for _, part := range tt.wantParts {
+			if !strings.Contains(body, part) {
+				t.Errorf("%s: body doesn't contain %q:\n%s", tt.name, part, body)
+			}
+		}
+		if strings.Contains(body, "log lines") || strings.Contains(body, "mariadb: ") {
+			t.Errorf("%s: body should show only the first line, without the package name:\n%s", tt.name, body)
+		}
+	}
+}
+
+func TestBackupLabelsAreUnique(t *testing.T) {
+	at := time.Date(2026, 11, 3, 12, 15, 0, 0, time.Local)
+	labels := backupLabels([]mariadb.Backup{
+		{Kind: mariadb.Manual, Taken: at.Add(30 * time.Second)},
+		{Kind: mariadb.Manual, Taken: at},
+		{Kind: mariadb.BeforeRecovery, Taken: at},
+	})
+	want := []string{
+		"Tue 3 Nov 2026, 12:15  ·  Backup",
+		"Tue 3 Nov 2026, 12:15  ·  Backup (2)",
+		"Tue 3 Nov 2026, 12:15  ·  Before recovery",
+	}
+	if strings.Join(labels, "|") != strings.Join(want, "|") {
+		t.Errorf("labels = %q, want %q", labels, want)
+	}
+}
+
+func TestMaintenanceRunsWorkThenReports(t *testing.T) {
+	u, _ := newTestUI(t)
+	ran, started := false, false
+	r := u.runMaintenance(
+		func(wasRunning bool, err error) bool { started = wasRunning; return false },
+		func(context.Context) error { ran = true; return errors.New("disk full") })
+	var reported error
+	u.busy = true
+	u.showBusy("Backing up…")
+	u.finishMaintenance(r, func(err error) { reported = err })
+	if !ran || started || reported == nil || reported.Error() != "disk full" {
+		t.Errorf("ran %v, wasRunning %v, reported %v", ran, started, reported)
+	}
+	if u.busy || u.status.Text != "Stopped" || u.action.Disabled() || u.more.Disabled() {
+		t.Errorf("after maintenance: busy %v, status %q", u.busy, u.status.Text)
+	}
+}
+
 // TestThemeHasBothModes checks Keel's own colours exist in light and dark
 // mode, and that the two modes really differ.
 func TestThemeHasBothModes(t *testing.T) {
@@ -306,6 +451,23 @@ func TestScreenshot(t *testing.T) {
 		}
 		u.applyCheck(14371, true, "")
 		save(t, w, filepath.Join(dir, mode.name+"-running.png"))
+
+		u.showMoreMenu()
+		save(t, w, filepath.Join(dir, mode.name+"-menu.png"))
+		w.Canvas().Overlays().Remove(w.Canvas().Overlays().Top())
+
+		u.applyCheck(0, true, "")
+		u.finishStart(startResult{port: 3307, err: fmt.Errorf("mariadb: %w (exit status 1)\n"+
+			"2026-11-03 14:39:12 0 [ERROR] Fatal error: Can't open and lock privilege tables: Incorrect file format 'global_priv'",
+			mariadb.ErrExitedDuringStartup)})
+		save(t, w, filepath.Join(dir, mode.name+"-repair.png"))
+		w.Canvas().Overlays().Remove(w.Canvas().Overlays().Top())
+
+		_, body := repairSummary(&mariadb.RepairReport{Copy: "/Users/kody/personal/keel-lab/backups/pre-repair-2026-11-03-145225",
+			Repaired: []string{"mysql.global_priv"}, Checked: 30}, nil)
+		u.inform("Repaired", body)
+		save(t, w, filepath.Join(dir, mode.name+"-repaired.png"))
+		w.Canvas().Overlays().Remove(w.Canvas().Overlays().Top())
 	}
 }
 

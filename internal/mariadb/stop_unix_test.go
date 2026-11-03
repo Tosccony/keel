@@ -10,12 +10,28 @@ import (
 	"time"
 )
 
-func TestStopNudgesWhenSQLUnreachable(t *testing.T) {
+// A root password (XAMPP courses often have students set one) means Keel
+// can't log in to ask for SHUTDOWN. On Linux and macOS, Stop falls back
+// to SIGTERM, which MariaDB also treats as a clean shutdown.
+func TestStopNudgesWhenSQLIsRefused(t *testing.T) {
 	s := startTestServer(t)
 	exited := s.Exited()
-	realPort := s.Port
-	s.Port = freePort(t) // SQL now points at an empty port, as if the server stopped answering
-	t.Cleanup(func() { s.Port = realPort })
+	db := openDB(t, s)
+	rows, err := db.Query("SELECT user, host FROM mysql.global_priv WHERE user = 'root'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accounts []string
+	for rows.Next() {
+		var user, host string
+		rows.Scan(&user, &host)
+		accounts = append(accounts, quoteIdent(user)+"@"+quoteIdent(host))
+	}
+	rows.Close()
+	for _, a := range accounts {
+		mustExec(t, db, "ALTER USER "+a+" IDENTIFIED BY 'class-password'")
+	}
+	db.Close()
 
 	res, err := s.Stop(context.Background())
 	if err != nil {

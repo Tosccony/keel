@@ -114,6 +114,16 @@ type child struct {
 // the server running: a slow start, such as crash recovery on a big database,
 // is still a healthy start, and killing it would cause the damage Keel exists
 // to prevent.
+// The MySQL driver logs dropped connections to stderr. A server that's
+// stopping or failing to start drops them on purpose, and Keel reports
+// what matters itself.
+func init() { mysql.SetLogger(&mysql.NopLogger{}) }
+
+// ErrExitedDuringStartup means mariadbd quit before accepting connections,
+// usually because of damage it can't recover from by itself. Repair is the
+// next step.
+var ErrExitedDuringStartup = errors.New("server exited during startup")
+
 func (s *Server) Start(ctx context.Context) error {
 	return s.start(ctx, true)
 }
@@ -160,7 +170,7 @@ func (s *Server) start(ctx context.Context, takeSnapshot bool) error {
 			// An earlier recovery attempt already saved the data from before
 			// any recovery ran. That copy is the one worth keeping.
 			rec.Snapshot = j.Snapshot
-			s.progress("Keeping the copy saved before the first recovery attempt: " + j.Snapshot)
+			s.progress("A copy from before this recovery is already saved: " + j.Snapshot)
 		case takeSnapshot:
 			s.progress("Saving a copy of the data folder before MariaDB touches it…")
 			path, err := s.snapshot()
@@ -218,8 +228,9 @@ func (s *Server) start(ctx context.Context, takeSnapshot bool) error {
 	return nil
 }
 
-// launch starts mariadbd and waits until it's ready.
-func (s *Server) launch(ctx context.Context) error {
+// launch starts mariadbd and waits until it's ready. extra adds options
+// for this run only, such as --skip-grant-tables for repair mode.
+func (s *Server) launch(ctx context.Context, extra ...string) error {
 	logf, err := os.OpenFile(s.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("mariadb: open log: %w", err)
@@ -229,7 +240,7 @@ func (s *Server) launch(ctx context.Context) error {
 
 	// exec.Command, not exec.CommandContext: CommandContext kills the process
 	// when the context ends.
-	cmd := exec.Command(filepath.Join(s.BinDir, binaryName), s.args()...)
+	cmd := exec.Command(filepath.Join(s.BinDir, binaryName), append(s.args(), extra...)...)
 	// Write straight to the log file instead of through a pipe, so the server
 	// never depends on Keel staying alive to read its output.
 	cmd.Stdout = logf
@@ -273,6 +284,9 @@ func (s *Server) Exited() <-chan struct{} {
 func (s *Server) validate() error {
 	info, err := os.Stat(s.DataDir)
 	if errors.Is(err, fs.ErrNotExist) {
+		if old := s.interruptedRestore(); old != "" {
+			return fmt.Errorf("mariadb: data folder %s is missing because a restore was interrupted. The data from before the restore is in %s; restore a copy, or rename that folder back to %s", s.DataDir, old, filepath.Base(s.DataDir))
+		}
 		return fmt.Errorf("mariadb: data folder %s doesn't exist; create it with mariadb-install-db first", s.DataDir)
 	}
 	if err != nil {
@@ -308,11 +322,13 @@ func (s *Server) pidFile() string {
 }
 
 // dsn is the connection string for the root account over TCP.
-func (s *Server) dsn() string {
+func (s *Server) dsn() string { return s.dsnFor(s.Port) }
+
+func (s *Server) dsnFor(port int) string {
 	cfg := mysql.NewConfig()
 	cfg.User = "root"
 	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Port))
+	cfg.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	cfg.Timeout = time.Second
 	cfg.ReadTimeout = 10 * time.Second
 	cfg.WriteTimeout = 10 * time.Second
@@ -339,7 +355,7 @@ func (s *Server) waitReady(ctx context.Context, logStart int64) error {
 		select {
 		case <-c.exited:
 			s.child = nil
-			return fmt.Errorf("mariadb: server exited during startup (%v)\n%s", c.err, s.logTail(logStart, 15))
+			return fmt.Errorf("mariadb: %w (%v)\n%s", ErrExitedDuringStartup, c.err, s.logTail(logStart, 15))
 		case <-ctx.Done():
 			return fmt.Errorf("mariadb: stopped waiting for the server to be ready; it is still running as PID %d: %w", s.PID(), ctx.Err())
 		case <-tick.C:

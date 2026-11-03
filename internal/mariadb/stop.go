@@ -51,6 +51,11 @@ func (s *Server) Stop(ctx context.Context) (StopResult, error) {
 	if pid == 0 {
 		return StopResult{}, ErrNotRunning
 	}
+	return s.shutdown(ctx, pid)
+}
+
+// shutdown is Stop without the lock, for callers that already hold it.
+func (s *Server) shutdown(ctx context.Context, pid int) (StopResult, error) {
 	res := StopResult{PID: pid}
 	began := time.Now()
 	logStart := fileSize(s.LogFile)
@@ -60,7 +65,7 @@ func (s *Server) Stop(ctx context.Context) (StopResult, error) {
 		s.progress("Couldn't update Keel's journal: " + err.Error())
 	}
 	s.progress("Asking MariaDB to shut down.")
-	if err := s.askShutdown(ctx); err != nil {
+	if err := s.askShutdown(ctx, pid); err != nil {
 		s.progress("Couldn't ask over SQL (" + err.Error() + ").")
 	} else {
 		s.progress("Waiting for MariaDB to finish writing to disk…")
@@ -149,13 +154,21 @@ func (s *Server) RunningPID() int {
 	return 0
 }
 
-// askShutdown runs SHUTDOWN over SQL, after checking that the server on our
+// askShutdown runs SHUTDOWN over SQL, after checking that the server on the
 // port is the one using our data folder.
-func (s *Server) askShutdown(ctx context.Context) error {
+//
+// It connects to the port the running server was started with, which can
+// differ from s.Port: keel-lab -port, or a port Keel moved to since. On
+// Windows a wrong port would leave nothing but the force-stop.
+func (s *Server) askShutdown(ctx context.Context, pid int) error {
 	ctx, cancel := context.WithTimeout(ctx, min(10*time.Second, orDefault(s.StopTimeout, defaultStopTimeout)))
 	defer cancel()
 
-	db, err := sql.Open("mysql", s.dsn())
+	port := s.Port
+	if p := serverPort(pid); p != 0 {
+		port = p
+	}
+	db, err := sql.Open("mysql", s.dsnFor(port))
 	if err != nil {
 		return err
 	}
