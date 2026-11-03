@@ -8,12 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-// These tests start real MariaDB servers. They need mariadbd and
+// Most of these tests start real MariaDB servers. They need mariadbd and
 // mariadb-install-db on PATH (or KEEL_MARIADB_BIN set to their folder) and
 // are skipped otherwise.
 
@@ -56,14 +57,12 @@ func TestStartCatchesSetupMistakes(t *testing.T) {
 }
 
 func TestStartIsReadyAndOurs(t *testing.T) {
-	s := newTestServer(t)
-	if err := s.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(func() { shutdown(t, s) })
-
+	s := startTestServer(t)
 	if s.PID() == 0 {
 		t.Error("PID() = 0 after a successful start")
+	}
+	if s.RunningPID() != s.PID() {
+		t.Errorf("RunningPID() = %d, want %d", s.RunningPID(), s.PID())
 	}
 	var port int
 	if err := openDB(t, s).QueryRow("SELECT @@port").Scan(&port); err != nil {
@@ -100,7 +99,7 @@ func TestStartReportsEarlyExit(t *testing.T) {
 
 	err := s.Start(context.Background())
 	if err == nil {
-		shutdown(t, s)
+		stopForCleanup(t, s)
 		t.Fatal("Start succeeded with an empty data folder")
 	}
 	if !strings.Contains(err.Error(), "exited during startup") || !strings.Contains(err.Error(), "last lines of") {
@@ -117,7 +116,7 @@ func TestCancelledStartLeavesServerRunning(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Start with an expired context: got %v, want DeadlineExceeded", err)
 	}
-	t.Cleanup(func() { shutdown(t, s) })
+	t.Cleanup(func() { stopForCleanup(t, s) })
 
 	select {
 	case <-s.Exited():
@@ -133,6 +132,122 @@ func TestCancelledStartLeavesServerRunning(t *testing.T) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+func TestStopIsClean(t *testing.T) {
+	s := startTestServer(t)
+	exited := s.Exited()
+	var msgs []string
+	s.Progress = func(m string) { msgs = append(msgs, m) }
+
+	res, err := s.Stop(context.Background())
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !res.Confirmed {
+		t.Error(`Stop didn't find "Shutdown complete" in the log`)
+	}
+	if res.Nudged {
+		t.Error("a normal stop shouldn't need a second request")
+	}
+	select {
+	case <-exited:
+	default:
+		t.Error("the process is still running after Stop returned")
+	}
+	if pid := s.RunningPID(); pid != 0 {
+		t.Errorf("RunningPID() = %d after Stop, want 0", pid)
+	}
+	if len(msgs) == 0 {
+		t.Error("Stop sent no progress messages")
+	}
+	if err := s.Start(context.Background()); err != nil {
+		t.Errorf("Start after Stop: %v", err)
+	}
+}
+
+func TestStopFindsServerStartedElsewhere(t *testing.T) {
+	s := startTestServer(t)
+	exited := s.Exited()
+
+	// A second Server with the same settings, like a new keel-lab run.
+	other := &Server{BinDir: s.BinDir, DataDir: s.DataDir, Port: s.Port, Socket: s.Socket, LogFile: s.LogFile}
+	if got := other.RunningPID(); got != s.PID() {
+		t.Fatalf("RunningPID() through the PID file = %d, want %d", got, s.PID())
+	}
+	res, err := other.Stop(context.Background())
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !res.Confirmed {
+		t.Error(`Stop didn't find "Shutdown complete" in the log`)
+	}
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Error("the server didn't exit")
+	}
+}
+
+func TestStopWhenNotRunning(t *testing.T) {
+	s := newTestServer(t)
+	if _, err := s.Stop(context.Background()); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("Stop with no server: got %v, want ErrNotRunning", err)
+	}
+}
+
+func TestStalePIDFileIsIgnored(t *testing.T) {
+	// After a crash the PID file stays behind, and its number can be reused.
+	// Point it at a live process that isn't MariaDB: this test itself.
+	s := newTestServer(t)
+	if err := os.WriteFile(s.pidFile(), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if pid := s.RunningPID(); pid != 0 {
+		t.Fatalf("RunningPID() trusted a stale PID file: %d", pid)
+	}
+	if _, err := s.Stop(context.Background()); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("Stop: got %v, want ErrNotRunning", err)
+	}
+	if err := s.Kill(); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("Kill: got %v, want ErrNotRunning", err) // if it had killed, we wouldn't be here
+	}
+}
+
+func TestKillThenStartRecovers(t *testing.T) {
+	s := startTestServer(t)
+	if _, err := openDB(t, s).Exec("CREATE DATABASE lab"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Kill(); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if pid := s.RunningPID(); pid != 0 {
+		t.Fatalf("RunningPID() = %d after Kill, want 0", pid)
+	}
+	logStart := fileSize(s.LogFile)
+
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start after Kill: %v", err)
+	}
+	if !strings.Contains(strings.Join(readLinesFrom(s.LogFile, logStart), "\n"), "crash") {
+		t.Error("expected crash-recovery lines in the log after a kill")
+	}
+	var name string
+	if err := openDB(t, s).QueryRow("SHOW DATABASES LIKE 'lab'").Scan(&name); err != nil {
+		t.Errorf("database created before the kill is gone: %v", err)
+	}
+}
+
+// startTestServer starts a fresh server and stops it when the test ends.
+func startTestServer(t *testing.T) *Server {
+	t.Helper()
+	s := newTestServer(t)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { stopForCleanup(t, s) })
+	return s
 }
 
 // newTestServer creates a fresh data folder and returns an unstarted Server.
@@ -154,7 +269,7 @@ func newTestServer(t *testing.T) *Server {
 	}
 
 	socket := filepath.Join(dir, "s")
-	if len(socket) > 100 { // macOS socket paths max out around 104 characters
+	if len(socket) > maxSocketPath-3 {
 		short, err := os.MkdirTemp("/tmp", "keel-")
 		if err != nil {
 			t.Fatal(err)
@@ -170,6 +285,21 @@ func newTestServer(t *testing.T) *Server {
 		Socket:  socket,
 		LogFile: filepath.Join(dir, "error.log"),
 	}
+}
+
+// stopForCleanup stops a test server. Tests must not leave servers behind,
+// so as a last resort it kills; Keel itself never does that without asking.
+func stopForCleanup(t *testing.T, s *Server) {
+	t.Helper()
+	s.StopTimeout, s.NudgeTimeout = 0, 0
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	_, err := s.Stop(ctx)
+	if err == nil || errors.Is(err, ErrNotRunning) {
+		return
+	}
+	s.Kill()
+	t.Errorf("test server didn't stop cleanly (%v) and was killed", err)
 }
 
 func binDir(t *testing.T) string {
@@ -205,26 +335,4 @@ func openDB(t *testing.T, s *Server) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
-}
-
-// shutdown stops a test server with SQL SHUTDOWN and waits for it to exit.
-// Stop() will replace this in the next step.
-func shutdown(t *testing.T, s *Server) {
-	t.Helper()
-	if s.Exited() == nil {
-		return
-	}
-	db, err := sql.Open("mysql", s.dsn())
-	if err == nil {
-		db.Exec("SHUTDOWN")
-		db.Close()
-	}
-	select {
-	case <-s.Exited():
-	case <-time.After(60 * time.Second):
-		// Tests must not leave servers behind, so they may kill as a last
-		// resort. Keel itself never does this without asking.
-		s.cmd.Process.Kill()
-		t.Error("test server didn't shut down within 60s and was killed")
-	}
 }

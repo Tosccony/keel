@@ -1,9 +1,10 @@
 // Package mariadb starts and stops a MariaDB server that Keel owns.
 //
 // The rule this package exists to enforce: the database is never killed by
-// accident. Nothing here sends a kill signal, a cancelled context never stops
-// the server, and the server runs in its own process group so signals aimed
-// at Keel (Ctrl+C, a crashing window) never reach it.
+// accident. Start and Stop never send a kill signal, a cancelled context
+// never stops the server, and the server runs in its own process group so
+// signals aimed at Keel (Ctrl+C, a crashing window) never reach it. The one
+// hard kill, Kill, has to be called on purpose after the user agrees.
 package mariadb
 
 import (
@@ -30,28 +31,43 @@ import (
 // server's port.
 var ErrPortInUse = errors.New("port already in use")
 
-const defaultReadyTimeout = 30 * time.Second
+const (
+	defaultReadyTimeout = 30 * time.Second
+	defaultStopTimeout  = 2 * time.Minute // a big buffer pool can take a while to flush
+	defaultNudgeTimeout = time.Minute
 
-// maxSocketPath is the longest Unix socket path MariaDB accepts on macOS.
-// Linux allows a few more characters; using the smaller limit everywhere
-// keeps behaviour the same.
-const maxSocketPath = 103
+	// maxSocketPath is the longest Unix socket path MariaDB accepts on
+	// macOS. Linux allows a few more characters; using the smaller limit
+	// everywhere keeps behaviour the same.
+	maxSocketPath = 103
+)
 
-// Server is one MariaDB server and the files it uses.
+// Server is one MariaDB server and the files it uses. It isn't safe for
+// concurrent use; Keel drives each server from one goroutine.
 type Server struct {
 	BinDir  string // folder that holds mariadbd
 	DataDir string // data folder, created beforehand by mariadb-install-db
 	Port    int
 	Socket  string // Unix socket path; macOS limits it to about 100 characters
 	LogFile string // MariaDB's error log
+	PIDFile string // where mariadbd writes its process ID; default DataDir/mariadbd.pid
 
-	// ReadyTimeout is how long Start waits for the server to accept
-	// connections. Zero means 30 seconds.
-	ReadyTimeout time.Duration
+	ReadyTimeout time.Duration // how long Start waits for connections; default 30s
+	StopTimeout  time.Duration // how long Stop waits after asking; default 2 minutes
+	NudgeTimeout time.Duration // how long Stop waits after asking again; default 1 minute
 
-	cmd     *exec.Cmd
-	exited  chan struct{} // closed when the process exits
-	exitErr error         // set before exited is closed
+	// Progress, if set, receives plain-language updates during Start and
+	// Stop, ready for the window's activity log.
+	Progress func(msg string)
+
+	child *child // the mariadbd this Server launched, while it runs
+}
+
+// child is a mariadbd process this Server launched.
+type child struct {
+	cmd    *exec.Cmd
+	exited chan struct{} // closed when the process exits
+	err    error         // exit status; read only after exited is closed
 }
 
 // Start launches mariadbd and returns once the server accepts connections.
@@ -61,7 +77,7 @@ type Server struct {
 // is still a healthy start, and killing it would cause the damage Keel exists
 // to prevent.
 func (s *Server) Start(ctx context.Context) error {
-	if s.cmd != nil {
+	if s.child != nil {
 		return errors.New("mariadb: server already started")
 	}
 	if err := s.validate(); err != nil {
@@ -75,11 +91,8 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("mariadb: open log: %w", err)
 	}
-	defer logf.Close() // the server keeps its own copy of the file handle
-	logStart := int64(0)
-	if info, err := logf.Stat(); err == nil {
-		logStart = info.Size() // so errors only show lines from this start
-	}
+	defer logf.Close()              // the server keeps its own copy of the file handle
+	logStart := fileSize(s.LogFile) // so errors only show lines from this start
 
 	// exec.Command, not exec.CommandContext: CommandContext kills the process
 	// when the context ends.
@@ -90,31 +103,36 @@ func (s *Server) Start(ctx context.Context) error {
 	cmd.Stderr = logf
 	detach(cmd)
 
+	s.progress(fmt.Sprintf("Starting MariaDB on port %d.", s.Port))
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("mariadb: start %s: %w", cmd.Path, err)
 	}
-	s.cmd = cmd
-	s.exited = make(chan struct{})
+	c := &child{cmd: cmd, exited: make(chan struct{})}
 	go func() {
-		s.exitErr = cmd.Wait()
-		close(s.exited)
+		c.err = cmd.Wait()
+		close(c.exited)
 	}()
+	s.child = c
 
 	return s.waitReady(ctx, logStart)
 }
 
-// PID returns the server's process ID, or 0 if it was never started.
+// PID returns the process ID of the server this Server started, or 0.
+// RunningPID also finds a server started elsewhere.
 func (s *Server) PID() int {
-	if s.cmd == nil || s.cmd.Process == nil {
+	if s.child == nil {
 		return 0
 	}
-	return s.cmd.Process.Pid
+	return s.child.cmd.Process.Pid
 }
 
-// Exited is closed when the server process exits. It is nil before Start,
-// and only works while the Keel process that started the server is running.
+// Exited is closed when the server this Server started exits. It is nil if
+// this Server hasn't started one.
 func (s *Server) Exited() <-chan struct{} {
-	return s.exited
+	if s.child == nil {
+		return nil
+	}
+	return s.child.exited
 }
 
 // validate catches setup mistakes before mariadbd starts, so they show up
@@ -145,7 +163,15 @@ func (s *Server) args() []string {
 		"--bind-address=127.0.0.1",
 		"--socket=" + s.Socket,
 		"--log-error=" + s.LogFile,
+		"--pid-file=" + s.pidFile(),
 	}
+}
+
+func (s *Server) pidFile() string {
+	if s.PIDFile != "" {
+		return s.PIDFile
+	}
+	return filepath.Join(s.DataDir, "mariadbd.pid")
 }
 
 // dsn is the connection string for the root account over TCP.
@@ -155,6 +181,8 @@ func (s *Server) dsn() string {
 	cfg.Net = "tcp"
 	cfg.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Port))
 	cfg.Timeout = time.Second
+	cfg.ReadTimeout = 10 * time.Second
+	cfg.WriteTimeout = 10 * time.Second
 	return cfg.FormatDSN()
 }
 
@@ -162,11 +190,7 @@ func (s *Server) dsn() string {
 // A successful ping is the real proof of readiness; the wording of MariaDB's
 // "ready for connections" log line changes between versions.
 func (s *Server) waitReady(ctx context.Context, logStart int64) error {
-	timeout := s.ReadyTimeout
-	if timeout == 0 {
-		timeout = defaultReadyTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, orDefault(s.ReadyTimeout, defaultReadyTimeout))
 	defer cancel()
 
 	db, err := sql.Open("mysql", s.dsn())
@@ -175,36 +199,54 @@ func (s *Server) waitReady(ctx context.Context, logStart int64) error {
 	}
 	defer db.Close()
 
+	c := s.child
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {
-		case <-s.exited:
-			return fmt.Errorf("mariadb: server exited during startup (%v)\n%s", s.exitErr, s.logTail(logStart, 15))
+		case <-c.exited:
+			s.child = nil
+			return fmt.Errorf("mariadb: server exited during startup (%v)\n%s", c.err, s.logTail(logStart, 15))
 		case <-ctx.Done():
 			return fmt.Errorf("mariadb: stopped waiting for the server to be ready; it is still running as PID %d: %w", s.PID(), ctx.Err())
 		case <-tick.C:
 			pingCtx, cancelPing := context.WithTimeout(ctx, time.Second)
 			err := db.PingContext(pingCtx)
 			cancelPing()
-			if err == nil {
-				return s.checkOwnDataDir(ctx, db)
+			if err != nil {
+				continue
 			}
+			if err := s.checkDataDir(ctx, db); err != nil {
+				return err
+			}
+			s.progress(fmt.Sprintf("MariaDB is ready (PID %d).", s.PID()))
+			return nil
 		}
 	}
 }
 
-// checkOwnDataDir makes sure the server answering on our port is the one we
-// started, not another MariaDB that ended up on the same port.
-func (s *Server) checkOwnDataDir(ctx context.Context, db *sql.DB) error {
+// queryer is satisfied by *sql.DB and *sql.Conn.
+type queryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// checkDataDir makes sure the server answering on our port is the one using
+// our data folder, not another MariaDB that ended up on the same port.
+func (s *Server) checkDataDir(ctx context.Context, q queryer) error {
 	var dir string
-	if err := db.QueryRowContext(ctx, "SELECT @@datadir").Scan(&dir); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT @@datadir").Scan(&dir); err != nil {
 		return fmt.Errorf("mariadb: ask the server for its data folder: %w", err)
 	}
 	if !sameDir(dir, s.DataDir) {
 		return fmt.Errorf("mariadb: port %d is answered by a server using %s, not %s", s.Port, dir, s.DataDir)
 	}
 	return nil
+}
+
+func (s *Server) progress(msg string) {
+	if s.Progress != nil {
+		s.Progress(msg)
+	}
 }
 
 // sameDir compares two folder paths after resolving symlinks. macOS and
@@ -223,26 +265,47 @@ func sameDir(a, b string) bool {
 	return strings.EqualFold(a, b)
 }
 
-// logTail returns the last n lines written to the log since offset from.
-func (s *Server) logTail(from int64, n int) string {
-	f, err := os.Open(s.LogFile)
+func orDefault(d, def time.Duration) time.Duration {
+	if d <= 0 {
+		return def
+	}
+	return d
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
 	if err != nil {
-		return ""
+		return 0
+	}
+	return info.Size()
+}
+
+// readLinesFrom returns the lines of a file after byte offset from.
+func readLinesFrom(path string, from int64) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
 	}
 	defer f.Close()
 	if _, err := f.Seek(from, io.SeekStart); err != nil {
-		return ""
+		return nil
 	}
 	var lines []string
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		lines = append(lines, sc.Text())
-		if len(lines) > n {
-			lines = lines[1:]
-		}
 	}
+	return lines
+}
+
+// logTail returns the last n lines written to the log since offset from.
+func (s *Server) logTail(from int64, n int) string {
+	lines := readLinesFrom(s.LogFile, from)
 	if len(lines) == 0 {
 		return ""
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
 	}
 	return "last lines of " + s.LogFile + ":\n  " + strings.Join(lines, "\n  ")
 }
