@@ -35,6 +35,7 @@ func main() {
 	w := a.NewWindow("Keel")
 	server := opts.Server()
 	u := newUI(w, server)
+	u.choosePort = opts.ChoosePort
 	w.SetContent(u.content())
 	w.Resize(fyne.NewSize(780, 540))
 

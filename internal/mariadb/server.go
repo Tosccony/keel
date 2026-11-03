@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+
+	"github.com/Tosccony/keel/internal/ports"
 )
 
 var (
@@ -78,6 +80,9 @@ type Server struct {
 	// BackupDir holds the copies taken before recovery. Default: backups/
 	// next to the data folder.
 	BackupDir string
+	// LockFile is locked while Keel starts, stops or sets up MariaDB.
+	// Default: keel.lock next to the data folder.
+	LockFile string
 
 	ReadyTimeout time.Duration // how long Start waits for connections; default 30s
 	StopTimeout  time.Duration // how long Stop waits after asking; default 2 minutes
@@ -129,12 +134,17 @@ func (s *Server) start(ctx context.Context, takeSnapshot bool) error {
 	if err := s.validate(); err != nil {
 		return err
 	}
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	// RunningPID also forgets a server this Server started that has since
 	// died, so a crashed server can be started again.
 	if pid := s.RunningPID(); pid != 0 {
 		return fmt.Errorf("mariadb: PID %d: %w", pid, ErrAlreadyRunning)
 	}
-	if portInUse(s.Port) {
+	if !ports.Free(s.Port) {
 		return fmt.Errorf("mariadb: port %d: %w", s.Port, ErrPortInUse)
 	}
 	s.lastRecovery = nil

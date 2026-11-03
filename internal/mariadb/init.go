@@ -32,6 +32,14 @@ func (s *Server) Init(ctx context.Context) error {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("mariadb: %w", err)
 	}
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, err := os.Stat(s.DataDir); err == nil {
+		return nil // another Keel created it before we took the lock
+	}
 	tmp, err := os.MkdirTemp(parent, ".keel-init-")
 	if err != nil {
 		return fmt.Errorf("mariadb: %w", err)

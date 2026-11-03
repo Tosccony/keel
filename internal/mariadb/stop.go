@@ -42,6 +42,11 @@ type StopResult struct {
 // If ctx ends first, Stop returns ctx's error and the server carries on
 // shutting down by itself.
 func (s *Server) Stop(ctx context.Context) (StopResult, error) {
+	unlock, err := s.lock()
+	if err != nil {
+		return StopResult{}, err
+	}
+	defer unlock()
 	pid := s.RunningPID()
 	if pid == 0 {
 		return StopResult{}, ErrNotRunning
@@ -89,6 +94,11 @@ func (s *Server) Stop(ctx context.Context) (StopResult, error) {
 // after Stop returned ErrStillRunning and the user agreed. The next start
 // runs crash recovery.
 func (s *Server) Kill() error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	pid := s.RunningPID()
 	if pid == 0 {
 		return ErrNotRunning

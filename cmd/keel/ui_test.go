@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"image/color"
 	"image/png"
 	"os"
@@ -29,6 +31,7 @@ func newThemedTestUI(t *testing.T, th fyne.Theme) (*ui, fyne.Window) {
 	server := &mariadb.Server{DataDir: filepath.Join(dir, "data"), Port: 3307, LogFile: filepath.Join(dir, "log")}
 	w := test.NewTempWindow(t, nil)
 	u := newUI(w, server)
+	u.recheck = func() {}
 	w.SetContent(u.content())
 	w.Resize(fyne.NewSize(780, 540))
 	return u, w
@@ -166,6 +169,76 @@ func TestProgressLevel(t *testing.T) {
 		if got := progressLevel(msg); got != want {
 			t.Errorf("progressLevel(%q) = %d, want %d", msg, got, want)
 		}
+	}
+}
+
+func TestStartMovesPortAndSaysWhy(t *testing.T) {
+	u, _ := newTestUI(t)
+	u.choosePort = func(_ context.Context, s *mariadb.Server) (string, error) {
+		s.Port = 4406
+		return "Port 3307 is in use by mysqld (PID 412) from XAMPP, so MariaDB will use port 4406 from now on.", nil
+	}
+	// The test server has no data folder, so the start itself fails; the
+	// move must still be shown.
+	u.finishStart(u.runStart(false))
+	if u.port != 4406 || !strings.Contains(u.detail.Text, "4406") {
+		t.Errorf("port %d, detail %q; want 4406", u.port, u.detail.Text)
+	}
+	lines := u.logLines()
+	if countContaining(lines, "from XAMPP, so MariaDB will use port 4406") != 1 || countContaining(lines, "Couldn't start") != 1 {
+		t.Errorf("log = %q", lines)
+	}
+	if u.entries[0].lvl != warn {
+		t.Errorf("the port move should be marked as a warning, got level %d", u.entries[0].lvl)
+	}
+}
+
+func TestNoFreePortStopsTheStart(t *testing.T) {
+	u, _ := newTestUI(t)
+	u.choosePort = func(context.Context, *mariadb.Server) (string, error) {
+		return "", errors.New("port 3307 is in use by a program (PID 9), and there's no free port from 3308 to 3407")
+	}
+	u.finishStart(u.runStart(false))
+	if countContaining(u.logLines(), "Couldn't start: port 3307 is in use") != 1 || u.port != 3307 {
+		t.Errorf("port %d, log %q", u.port, u.logLines())
+	}
+}
+
+func TestBusyLockIsExplained(t *testing.T) {
+	u, _ := newTestUI(t)
+	busy := fmt.Errorf("mariadb: %w", mariadb.ErrBusy)
+
+	u.busy = true
+	u.showBusy("Starting…")
+	u.finishStart(startResult{port: 3307, err: busy})
+	if u.busy || u.status.Text != "Stopped" || u.action.Disabled() {
+		t.Errorf("after a busy start: busy=%v status=%q disabled=%v", u.busy, u.status.Text, u.action.Disabled())
+	}
+
+	u.show(77)
+	u.busy = true
+	u.showBusy("Stopping…")
+	u.finishKill(busy)
+	if u.status.Text != "Running" || u.action.Disabled() {
+		t.Errorf("after a busy force-stop: status=%q disabled=%v", u.status.Text, u.action.Disabled())
+	}
+	if n := countContaining(u.logLines(), "Another Keel window"); n != 2 {
+		t.Errorf("the busy note was logged %d times, want 2: %q", n, u.logLines())
+	}
+}
+
+// A failed force-stop used to leave the window stuck on "Stopping…".
+func TestFailedForceStopRestoresTheCard(t *testing.T) {
+	u, _ := newTestUI(t)
+	u.show(77)
+	u.busy = true
+	u.showBusy("Stopping…")
+	u.finishKill(errors.New("operation not permitted"))
+	if u.busy || u.status.Text != "Running" || u.action.Text != "Stop" || u.action.Disabled() {
+		t.Errorf("status=%q action=%q disabled=%v", u.status.Text, u.action.Text, u.action.Disabled())
+	}
+	if countContaining(u.logLines(), "Couldn't force-stop: operation not permitted") != 1 {
+		t.Errorf("log = %q", u.logLines())
 	}
 }
 

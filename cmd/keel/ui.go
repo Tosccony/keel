@@ -73,6 +73,16 @@ type ui struct {
 
 	busy   bool // a start or stop is in progress
 	pidNow int  // the PID last shown; 0 means stopped
+	port   int  // the port shown; the server's Port is only touched under mu
+
+	// choosePort, if set, runs before each start to move MariaDB off a
+	// port another program holds. It returns a note for the log.
+	choosePort func(context.Context, *mariadb.Server) (string, error)
+
+	// recheck runs after each start or stop: checkNow, except in tests,
+	// where Fyne's test driver would run the check's result on another
+	// goroutine instead of the UI thread.
+	recheck func()
 
 	// MariaDB's card.
 	name    *widget.Label
@@ -102,6 +112,7 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 	u := &ui{
 		win:          win,
 		server:       server,
+		port:         server.Port,
 		name:         widget.NewLabel("MariaDB"),
 		version:      muted(""),
 		detail:       muted(""),
@@ -155,6 +166,7 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 	server.Progress = func(msg string) {
 		fyne.Do(func() { u.log(progressLevel(msg), msg) })
 	}
+	u.recheck = u.checkNow
 	u.show(u.pidNow)
 	return u
 }
@@ -227,15 +239,14 @@ func (u *ui) show(pid int) {
 	u.pidNow = pid
 	u.spinner.Stop()
 	u.spinner.Hide()
+	u.detail.SetText(u.detailText())
 	if pid != 0 {
 		u.status.set("Running", theme.ColorNameSuccess)
-		u.detail.SetText(fmt.Sprintf("Port %d  ·  PID %d", u.server.Port, pid))
 		u.action.SetText("Stop")
 		u.action.SetIcon(theme.MediaStopIcon())
 		u.action.Importance = widget.MediumImportance
 	} else {
 		u.status.set("Stopped", "")
-		u.detail.SetText(fmt.Sprintf("Port %d", u.server.Port))
 		u.action.SetText("Start")
 		u.action.SetIcon(theme.MediaPlayIcon())
 		u.action.Importance = widget.HighImportance
@@ -243,6 +254,24 @@ func (u *ui) show(pid int) {
 	u.action.Enable()
 	u.action.Refresh()
 }
+
+// detailText is the line under MariaDB's name: its port, and its PID while
+// running.
+func (u *ui) detailText() string {
+	if u.pidNow != 0 {
+		return fmt.Sprintf("Port %d  ·  PID %d", u.port, u.pidNow)
+	}
+	return fmt.Sprintf("Port %d", u.port)
+}
+
+// setPort shows a new port, after choosePort moved MariaDB.
+func (u *ui) setPort(port int) {
+	u.port = port
+	u.detail.SetText(u.detailText())
+}
+
+// busyNote explains ErrBusy.
+const busyNote = "Another Keel window (or keel-lab) is starting or stopping MariaDB right now. Try again in a moment."
 
 // showBusy shows "Starting…" or "Stopping…" and disables the button.
 func (u *ui) showBusy(text string) {
@@ -271,40 +300,69 @@ func (u *ui) start(withoutCopy bool) {
 	u.busy = true
 	u.showBusy("Starting…")
 	go func() {
-		u.mu.Lock()
-		var err error
-		if withoutCopy {
-			err = u.server.StartWithoutSnapshot(context.Background())
-		} else {
-			err = u.server.Start(context.Background())
-		}
-		pid := u.server.RunningPID()
-		rec := u.server.LastRecovery()
-		u.mu.Unlock()
-
-		fyne.Do(func() {
-			u.busy = false
-			u.show(pid)
-			u.checkNow()
-			switch {
-			case err == nil && rec != nil:
-				u.showRecovery(rec)
-			case err == nil:
-			case errors.Is(err, mariadb.ErrAlreadyRunning):
-				u.log(info, "MariaDB is already running.")
-			case errors.Is(err, mariadb.ErrSnapshotFailed):
-				u.confirmStartWithoutCopy(err)
-			default:
-				msg := err.Error()
-				if errors.Is(err, mariadb.ErrPortInUse) {
-					msg = fmt.Sprintf("Port %d is already in use by another program.", u.server.Port)
-				}
-				first, _, _ := strings.Cut(msg, "\n")
-				u.log(bad, "Couldn't start: "+strings.TrimPrefix(first, "mariadb: "))
-				dialog.ShowError(errors.New(msg), u.win)
-			}
-		})
+		r := u.runStart(withoutCopy)
+		fyne.Do(func() { u.finishStart(r) })
 	}()
+}
+
+// startResult is what runStart hands back to the UI thread.
+type startResult struct {
+	port, pid int
+	rec       *mariadb.Recovery
+	err       error
+}
+
+// runStart moves MariaDB off a taken port if it has to, then starts it.
+// It runs off the UI thread.
+func (u *ui) runStart(withoutCopy bool) startResult {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	ctx := context.Background()
+	var err error
+	if u.choosePort != nil {
+		var note string
+		note, err = u.choosePort(ctx, u.server)
+		if note != "" {
+			port := u.server.Port
+			fyne.Do(func() {
+				u.setPort(port)
+				u.log(warn, note)
+			})
+		}
+	}
+	if err == nil && withoutCopy {
+		err = u.server.StartWithoutSnapshot(ctx)
+	} else if err == nil {
+		err = u.server.Start(ctx)
+	}
+	return startResult{port: u.server.Port, pid: u.server.RunningPID(), rec: u.server.LastRecovery(), err: err}
+}
+
+// finishStart shows how a start went. It runs on the UI thread.
+func (u *ui) finishStart(r startResult) {
+	u.busy = false
+	u.port = r.port
+	u.show(r.pid)
+	u.recheck()
+	switch err := r.err; {
+	case err == nil && r.rec != nil:
+		u.showRecovery(r.rec)
+	case err == nil:
+	case errors.Is(err, mariadb.ErrBusy):
+		u.log(info, busyNote)
+	case errors.Is(err, mariadb.ErrAlreadyRunning):
+		u.log(info, "MariaDB is already running.")
+	case errors.Is(err, mariadb.ErrSnapshotFailed):
+		u.confirmStartWithoutCopy(err)
+	default:
+		msg := err.Error()
+		if errors.Is(err, mariadb.ErrPortInUse) {
+			msg = fmt.Sprintf("Port %d is already in use by another program.", r.port)
+		}
+		first, _, _ := strings.Cut(msg, "\n")
+		u.log(bad, "Couldn't start: "+strings.TrimPrefix(first, "mariadb: "))
+		dialog.ShowError(errors.New(msg), u.win)
+	}
 }
 
 // showRecovery tells the user what happened after an unclean shutdown.
@@ -369,17 +427,25 @@ func (u *ui) stop() {
 				u.show(res.PID)
 				u.confirmKill()
 				return
+			case errors.Is(err, mariadb.ErrBusy):
+				u.log(info, busyNote)
+				u.show(u.pidNow)
+				u.recheck()
+				return
 			case errors.Is(err, mariadb.ErrNotRunning):
 				u.log(info, "MariaDB had already stopped.")
 			case err != nil:
 				u.log(bad, "Couldn't stop: "+err.Error())
+				u.show(u.pidNow)
+				u.recheck()
+				return
 			case res.Confirmed:
 				u.log(good, fmt.Sprintf(`Stopped cleanly in %.1fs. MariaDB's log confirms "Shutdown complete".`, res.Took.Seconds()))
 			default:
 				u.log(warn, fmt.Sprintf(`Stopped in %.1fs, but "Shutdown complete" isn't in MariaDB's log.`, res.Took.Seconds()))
 			}
 			u.show(0)
-			u.checkNow()
+			u.recheck()
 		})
 	}()
 }
@@ -401,19 +467,32 @@ func (u *ui) confirmKill() {
 				u.mu.Lock()
 				err := u.server.Kill()
 				u.mu.Unlock()
-				fyne.Do(func() {
-					u.busy = false
-					if err != nil {
-						u.log(bad, "Couldn't force-stop: "+err.Error())
-					}
-					u.checkNow()
-				})
+				fyne.Do(func() { u.finishKill(err) })
 			}()
 		}, u.win)
 	d.SetConfirmText("Force-stop")
 	d.SetDismissText("Keep running")
 	d.SetConfirmImportance(widget.DangerImportance)
 	d.Show()
+}
+
+// finishKill shows how a force-stop went. On success the server's own
+// progress message has already said so.
+func (u *ui) finishKill(err error) {
+	u.busy = false
+	switch {
+	case errors.Is(err, mariadb.ErrBusy):
+		u.log(info, busyNote)
+		u.show(u.pidNow)
+	case errors.Is(err, mariadb.ErrNotRunning):
+		u.show(0)
+	case err != nil:
+		u.log(bad, "Couldn't force-stop: "+err.Error())
+		u.show(u.pidNow)
+	default:
+		u.show(0)
+	}
+	u.recheck()
 }
 
 // checkNow looks up whether MariaDB is running, in the background, and

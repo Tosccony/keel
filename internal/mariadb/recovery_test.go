@@ -66,9 +66,13 @@ func TestInitFailureLeavesNothing(t *testing.T) {
 	if err := s.Init(context.Background()); err == nil {
 		t.Fatal("Init succeeded without mariadb-install-db")
 	}
+	// Only the lock file may stay: it's never deleted, so two Keels always
+	// lock the same file.
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 0 {
-		t.Errorf("a failed Init left %d entries behind", len(entries))
+	for _, e := range entries {
+		if e.Name() != "keel.lock" {
+			t.Errorf("a failed Init left %s behind", e.Name())
+		}
 	}
 }
 

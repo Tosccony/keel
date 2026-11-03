@@ -87,8 +87,9 @@ On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel
 | Path | What it is |
 |---|---|
 | `cmd/keel/` | The Keel window: a card per service with Start/Stop, a warning after an unclean shutdown, and an activity log. `icon.svg` is the logo; `theme.go` holds the light and dark colours |
-| `internal/lab/` | Development setup shared by `keel` and `keel-lab` until MariaDB is bundled |
-| `internal/mariadb/` | Starts and stops MariaDB safely, and recovers from unclean shutdowns: a crash journal, a safety copy before recovery, and a check of every table |
+| `internal/lab/` | Development setup shared by `keel` and `keel-lab` until MariaDB is bundled. Remembers a port Keel moved to in `keel-settings.json` |
+| `internal/ports/` | Finds free ports, and names the program holding a taken one |
+| `internal/mariadb/` | Starts and stops MariaDB safely, and recovers from unclean shutdowns: a crash journal, a safety copy before recovery, a check of every table, and a lock so two Keels never act on the same data folder at once |
 | `cmd/keel-lab/` | Developer tool for trying the server code against a local MariaDB. Not shipped |
 | `packaging/windows/` | Inno Setup script and icon for the `.exe` installer |
 | `packaging/macos/` | `Info.plist` and icon for `Keel.app` |

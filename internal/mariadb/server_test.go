@@ -27,21 +27,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestPortInUse(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	if !portInUse(port) {
-		t.Errorf("portInUse(%d) = false while a listener is open", port)
-	}
-	l.Close()
-	if portInUse(port) {
-		t.Errorf("portInUse(%d) = true after the listener closed", port)
-	}
-}
-
 func TestStartCatchesSetupMistakes(t *testing.T) {
 	dir := t.TempDir()
 	tests := []struct {

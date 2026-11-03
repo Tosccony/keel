@@ -1,13 +1,16 @@
 // Package lab is the development setup that keel and keel-lab share until
 // Keel ships its own MariaDB: the mariadbd on this computer (Homebrew's,
-// for example), a data folder in ~/personal/keel-lab, and port 3307.
+// for example), a data folder in ~/personal/keel-lab, and port 3307 (or the
+// port Keel moved to when 3307 was taken; see ChoosePort).
 package lab
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	"github.com/Tosccony/keel/internal/mariadb"
 )
@@ -16,7 +19,11 @@ import (
 type Options struct {
 	BinDir string // folder that holds mariadbd
 	Folder string // holds data/, the socket and the log
-	Port   int
+	Port   int    // preferred port; a port saved by ChoosePort wins unless PortSet
+
+	// PortSet means the port was asked for explicitly (-port), so it
+	// overrides the one ChoosePort saved.
+	PortSet bool
 }
 
 // Defaults returns the standard lab setup.
@@ -33,15 +40,26 @@ func Defaults() Options {
 func (o *Options) AddFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.BinDir, "bin", o.BinDir, "folder that holds mariadbd")
 	fs.StringVar(&o.Folder, "lab", o.Folder, "lab folder (holds data/, the socket and the log)")
-	fs.IntVar(&o.Port, "port", o.Port, "MariaDB port")
+	fs.Func("port", fmt.Sprintf("MariaDB port (default %d, or the port Keel last moved it to)", o.Port), func(v string) error {
+		p, err := strconv.Atoi(v)
+		if err != nil || p < 1 || p > 65535 {
+			return fmt.Errorf("not a port: %q", v)
+		}
+		o.Port, o.PortSet = p, true
+		return nil
+	})
 }
 
 // Server returns the MariaDB server these options describe.
 func (o Options) Server() *mariadb.Server {
+	port := o.Port
+	if st, err := loadSettings(o.settingsFile()); err == nil && st.MariaDBPort != 0 && !o.PortSet {
+		port = st.MariaDBPort
+	}
 	return &mariadb.Server{
 		BinDir:  o.BinDir,
 		DataDir: filepath.Join(o.Folder, "data"),
-		Port:    o.Port,
+		Port:    port,
 		Socket:  filepath.Join(o.Folder, "mysql.sock"),
 		LogFile: filepath.Join(o.Folder, "mariadb.log"),
 	}

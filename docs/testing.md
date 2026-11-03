@@ -83,7 +83,7 @@ cost a damaged database.
 | # | Case | Test |
 |---|---|---|
 | 44 | Start waits for a real ping and confirms the server is using our data folder | `TestStartIsReadyAndOurs` |
-| 45 | Port already taken: refused before launching, journal untouched | `TestStartRefusesBusyPort`, `TestPortInUse` |
+| 45 | Port already taken: refused before launching, journal untouched | `TestStartRefusesBusyPort` |
 | 46 | Same data folder already running (even on another port): refused | `TestStartRefusesWhenAlreadyRunning` |
 | 47 | Missing data folder or over-long socket path: refused with a plain message | `TestStartCatchesSetupMistakes` |
 | 48 | MariaDB exits during startup: error quotes its log | `TestStartReportsEarlyExit` |
@@ -107,27 +107,53 @@ cost a damaged database.
 | 61 | Progress messages get the right mark (none, tick, warning, error) | `TestProgressLevel` |
 | 62 | Keel's colours exist in both light and dark mode, and differ | `TestThemeHasBothModes` |
 
+### The data-folder lock
+
+Two Keels (two windows, or a window and keel-lab) must never start, stop or recover the same MariaDB at once.
+
+| # | Case | Test |
+|---|---|---|
+| 63 | The lock is exclusive between two Keels; the lock file stays in place | `TestLockIsExclusive` |
+| 64 | Another process holds the lock: busy. Kill that process: the OS frees the lock, so it never goes stale | `TestLockAcrossProcesses` |
+| 65 | While locked, Start, Start without a copy, Stop, Kill and Init all refuse and change nothing | `TestBusyFolderRefusesEverything` |
+| 66 | Two Starts pressed at the same moment: exactly one MariaDB starts | `TestTwoStartsAtOnce` |
+| 67 | The window explains "another Keel is busy" for a start and a force-stop | `TestBusyLockIsExplained` |
+| 68 | A failed force-stop puts the card back instead of leaving it on "Stopping…" | `TestFailedForceStopRestoresTheCard` |
+
+### Ports
+
+| # | Case | Test |
+|---|---|---|
+| 69 | A port counts as taken when something listens on 127.0.0.1, on every address (`*:port`), or on `::1` only | `TestFreeAndAnswers`, `TestAllAddressesListenerCountsAsTaken`, `TestIPv6OnlyListenerCountsAsTaken` |
+| 70 | Impossible ports are rejected, by the checks and by `-port` | `TestFreeRejectsImpossiblePorts`, `TestPortFlagRejectsNonsense` |
+| 71 | The next free port skips taken and ruled-out ports, gives up after 100, and never goes past 65535 | `TestNextPassesOverTakenPorts`, `TestNextGivesUp` |
+| 72 | The program holding a port is named, with "from XAMPP" when its path says so | `TestWhoFindsTheListener`, `TestWhoOnFreePort`, `TestHolderString` |
+| 73 | Port taken: MariaDB moves to the next free port, the note names the holder, and the new port is remembered; `-port` still overrides | `TestChoosePortMovesAndRemembers` |
+| 74 | Port free: nothing moves and nothing is saved | `TestChoosePortKeepsAFreePort` |
+| 75 | The choice can't be saved: MariaDB still moves, with a warning. A broken settings file is ignored | `TestChoosePortStillMovesWhenSettingsCantBeSaved`, `TestBrokenSettingsFileIsIgnored` |
+| 76 | The window shows the new port and why; no free port stops the start with a clear message | `TestStartMovesPortAndSaysWhy`, `TestNoFreePortStopsTheStart` |
+
 ## Still to cover
 
 These need real hardware, features that aren't built yet, or a longer run.
 
 | # | Case | Why it matters | Blocked on |
 |---|---|---|---|
-| 63 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
-| 64 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
-| 65 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
-| 66 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
-| 67 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
-| 68 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
-| 69 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
-| 70 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
-| 71 | Two windows press Start at the same moment | Needs the data-folder lock | Data-folder lock |
-| 72 | Damaged Aria system tables (`mysql.global_priv`), the exact XAMPP error | Needs the repair flow | Repair and restore buttons |
-| 73 | Restoring from a safety copy | Needs the restore feature | Restore button |
-| 74 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
-| 75 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
-| 76 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
-| 77 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
-| 78 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
-| 79 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Data-folder lock |
-| 80 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
+| 77 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
+| 78 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
+| 79 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
+| 80 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
+| 81 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
+| 82 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
+| 83 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
+| 84 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
+| 85 | Damaged Aria system tables (`mysql.global_priv`), the exact XAMPP error | Needs the repair flow | Repair and restore buttons |
+| 86 | Restoring from a safety copy | Needs the restore feature | Restore button |
+| 87 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
+| 88 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
+| 89 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
+| 90 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
+| 91 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
+| 92 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Manual test |
+| 93 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
+| 94 | A port held by another user's program or a system service (XAMPP's MySQL installed as a Windows service) | Windows names it; macOS and Linux can only say "another program" without admin rights | Windows support |

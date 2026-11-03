@@ -45,12 +45,12 @@ func main() {
 		}
 		fmt.Println("Data folder:", s.DataDir)
 	case "start":
-		start(ctx, s)
+		start(ctx, opts, s)
 	case "stop":
 		stop(ctx, s)
 	case "status":
 		if pid := s.RunningPID(); pid != 0 {
-			fmt.Printf("Running, PID %d.\n", pid)
+			fmt.Printf("Running on port %d, PID %d.\n", s.Port, pid)
 		} else if clean, why := s.LastShutdown(); clean {
 			fmt.Println("Not running. Last shutdown: clean.")
 		} else {
@@ -77,9 +77,16 @@ func main() {
 	}
 }
 
-func start(ctx context.Context, s *mariadb.Server) {
+func start(ctx context.Context, opts lab.Options, s *mariadb.Server) {
+	note, err := opts.ChoosePort(ctx, s)
+	if err != nil {
+		fail(err)
+	}
+	if note != "" {
+		fmt.Println(note)
+	}
 	began := time.Now()
-	err := s.Start(ctx)
+	err = s.Start(ctx)
 	switch {
 	case errors.Is(err, mariadb.ErrAlreadyRunning):
 		fmt.Printf("MariaDB is already running (PID %d).\n", s.RunningPID())
