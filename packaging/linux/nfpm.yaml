@@ -22,6 +22,10 @@ contents:
       mode: 0755
   - src: ./packaging/linux/keel.desktop
     dst: /usr/share/applications/keel.desktop
+  - src: ./packaging/linux/keel.png
+    dst: /usr/share/icons/hicolor/512x512/apps/keel.png
+  - src: ./cmd/keel/icon.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/keel.svg
 
 overrides:
   deb:

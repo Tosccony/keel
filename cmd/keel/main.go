@@ -30,21 +30,23 @@ func main() {
 	}
 
 	a := app.NewWithID("io.github.tosccony.keel")
+	a.Settings().SetTheme(keelTheme{})
+	a.SetIcon(appIcon)
 	w := a.NewWindow("Keel")
 	server := opts.Server()
 	u := newUI(w, server)
 	w.SetContent(u.content())
-	w.Resize(fyne.NewSize(720, 440))
+	w.Resize(fyne.NewSize(780, 540))
 
-	u.log("Keel", fmt.Sprintf("Keel %s. Watching the MariaDB in %s.", version, server.DataDir))
+	u.log(info, "Watching the MariaDB in "+server.DataDir+".")
 	go func() {
 		v, err := server.Version()
 		fyne.Do(func() {
 			if err != nil {
-				u.log("MariaDB", fmt.Sprintf("Can't find MariaDB in %s.", server.BinDir))
+				u.log(bad, fmt.Sprintf("Can't find MariaDB in %s.", server.BinDir))
 				return
 			}
-			u.module.SetText("MariaDB " + v)
+			u.setVersion(v)
 		})
 	}()
 	u.checkNow()

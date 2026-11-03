@@ -72,8 +72,10 @@ Then:
 ```sh
 go test ./...                         # tests start real MariaDB servers; skipped if MariaDB isn't installed
 go run ./cmd/keel-lab start           # start MariaDB from ~/personal/keel-lab on port 3307
-go run ./cmd/keel-lab stop            # stop it the clean way (also: status)
+go run ./cmd/keel-lab stop            # stop it the clean way (also: init, status, check)
 go run ./cmd/keel                     # run the app
+KEEL_SCREENSHOT=/tmp go test ./cmd/keel -run Screenshot   # pictures of the window, light and dark
+scripts/make-icons.sh                 # rebuild the app icons after changing cmd/keel/icon.svg
 scripts/package-macos.sh 0.1.0        # macOS: dist/Keel-macOS.dmg
 scripts/package-linux.sh 0.1.0        # Linux: dist/*.deb, *.rpm, *.tar.gz (needs nfpm)
 ```
@@ -84,13 +86,14 @@ On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel
 
 | Path | What it is |
 |---|---|
-| `cmd/keel/` | The Keel window: a MariaDB row with Start/Stop and an activity log |
+| `cmd/keel/` | The Keel window: a card per service with Start/Stop, a warning after an unclean shutdown, and an activity log. `icon.svg` is the logo; `theme.go` holds the light and dark colours |
 | `internal/lab/` | Development setup shared by `keel` and `keel-lab` until MariaDB is bundled |
-| `internal/mariadb/` | Starts and stops MariaDB safely: its own process group, a port check, a readiness ping, and the clean-stop sequence. It only kills when told to |
+| `internal/mariadb/` | Starts and stops MariaDB safely, and recovers from unclean shutdowns: a crash journal, a safety copy before recovery, and a check of every table |
 | `cmd/keel-lab/` | Developer tool for trying the server code against a local MariaDB. Not shipped |
-| `packaging/windows/` | Inno Setup script for the `.exe` installer |
-| `packaging/macos/` | `Info.plist` for `Keel.app` |
-| `packaging/linux/` | `.desktop` entry and nfpm config for `.deb` and `.rpm` |
-| `scripts/` | Packaging scripts the release workflow runs |
+| `packaging/windows/` | Inno Setup script and icon for the `.exe` installer |
+| `packaging/macos/` | `Info.plist` and icon for `Keel.app` |
+| `packaging/linux/` | `.desktop` entry, icon, and nfpm config for `.deb` and `.rpm` |
+| `scripts/` | Packaging scripts the release workflow runs, and `make-icons.sh` |
 | `install.sh`, `install.ps1` | One-line installers for the latest release |
 | `.github/workflows/release.yml` | Tag-triggered build and release |
+| `docs/testing.md` | Every crash-safety test case, automated and still to do |

@@ -23,6 +23,6 @@ nfpm package --config packaging/linux/nfpm.yaml --packager rpm --target "$DIST/k
 # Plain archive for distros without apt, dnf or zypper.
 tar -czf "$DIST/keel_linux_x86_64.tar.gz" \
   -C "$DIST/linux" keel \
-  -C "$ROOT/packaging/linux" keel.desktop
+  -C "$ROOT/packaging/linux" keel.desktop keel.png
 
 echo "Built $DIST/keel_amd64.deb, keel_x86_64.rpm, keel_linux_x86_64.tar.gz"

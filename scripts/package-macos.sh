@@ -26,6 +26,7 @@ done
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 lipo -create -output "$APP/Contents/MacOS/keel" "$WORK/keel-arm64" "$WORK/keel-amd64"
 sed "s/__VERSION__/$VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$APP/Contents/Info.plist"
+cp "$ROOT/packaging/macos/Keel.icns" "$APP/Contents/Resources/"
 
 # Ad-hoc signature (Apple Silicon refuses to run unsigned code).
 # Swap "-" for a "Developer ID Application" identity once there is one.

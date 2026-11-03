@@ -10,6 +10,8 @@
 	<string>io.github.tosccony.keel</string>
 	<key>CFBundleExecutable</key>
 	<string>keel</string>
+	<key>CFBundleIconFile</key>
+	<string>Keel</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

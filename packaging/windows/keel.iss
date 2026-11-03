@@ -34,17 +34,21 @@ OutputBaseFilename=Keel-Setup-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\keel.exe
+SetupIconFile=keel.ico
+; keel.exe has no icon of its own yet (that needs a resource tool), so the
+; shortcuts and Apps & features use keel.ico. The window sets its own icon.
+UninstallDisplayIcon={app}\keel.ico
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "keel.exe"; Flags: ignoreversion
+Source: "keel.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Keel"; Filename: "{app}\keel.exe"
-Name: "{autodesktop}\Keel"; Filename: "{app}\keel.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Keel"; Filename: "{app}\keel.exe"; IconFilename: "{app}\keel.ico"
+Name: "{autodesktop}\Keel"; Filename: "{app}\keel.exe"; IconFilename: "{app}\keel.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\keel.exe"; Description: "{cm:LaunchProgram,Keel}"; Flags: nowait postinstall skipifsilent

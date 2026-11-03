@@ -3,5 +3,6 @@ Type=Application
 Name=Keel
 Comment=Local web stack control panel (Apache, PHP, MariaDB)
 Exec=keel
+Icon=keel
 Terminal=false
 Categories=Development;
