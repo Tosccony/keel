@@ -6,7 +6,7 @@ A local web stack for Windows, macOS and Linux: Apache, PHP, MariaDB and phpMyAd
 - **Picks a free port on its own.** It starts on 8080. If that port is taken, it moves to the next free one and tells you.
 - **No accounts.** No sign-in, no telemetry.
 
-> **Status: early.** Releases currently contain a placeholder window while the real control panel is built.
+> **Status: early.** The window can start and stop MariaDB safely, but Keel doesn't bundle MariaDB yet. For now it controls the development setup in `internal/lab` (a MariaDB you install yourself, with its data in `~/personal/keel-lab`).
 
 ## Install
 
@@ -84,7 +84,8 @@ On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel
 
 | Path | What it is |
 |---|---|
-| `cmd/keel/` | App entry point (placeholder window for now) |
+| `cmd/keel/` | The Keel window: a MariaDB row with Start/Stop and an activity log |
+| `internal/lab/` | Development setup shared by `keel` and `keel-lab` until MariaDB is bundled |
 | `internal/mariadb/` | Starts and stops MariaDB safely: its own process group, a port check, a readiness ping, and the clean-stop sequence. It only kills when told to |
 | `cmd/keel-lab/` | Developer tool for trying the server code against a local MariaDB. Not shipped |
 | `packaging/windows/` | Inno Setup script for the `.exe` installer |

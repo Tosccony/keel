@@ -5,7 +5,7 @@
 //	go run ./cmd/keel-lab status   # is it running?
 //	go run ./cmd/keel-lab stop     # stop it the clean way
 //
-// The server keeps running after keel-lab exits, the same way it will keep
+// The server keeps running after keel-lab exits, the same way it keeps
 // running after Keel's window closes.
 package main
 
@@ -16,33 +16,24 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Tosccony/keel/internal/lab"
 	"github.com/Tosccony/keel/internal/mariadb"
 )
 
 func main() {
-	home, _ := os.UserHomeDir()
-	bin := flag.String("bin", defaultBinDir(), "folder that holds mariadbd")
-	lab := flag.String("lab", filepath.Join(home, "personal", "keel-lab"), "lab folder (holds data/, the socket and the log)")
-	port := flag.Int("port", 3307, "port to listen on")
+	opts := lab.Defaults()
+	opts.AddFlags(flag.CommandLine)
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] start|stop|status")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	s := &mariadb.Server{
-		BinDir:   *bin,
-		DataDir:  filepath.Join(*lab, "data"),
-		Port:     *port,
-		Socket:   filepath.Join(*lab, "mysql.sock"),
-		LogFile:  filepath.Join(*lab, "mariadb.log"),
-		Progress: func(msg string) { fmt.Println("  " + msg) },
-	}
+	s := opts.Server()
+	s.Progress = func(msg string) { fmt.Println("  " + msg) }
 
 	switch flag.Arg(0) {
 	case "start":
@@ -104,16 +95,4 @@ func stop(s *mariadb.Server) {
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "error:", err)
 	os.Exit(1)
-}
-
-// defaultBinDir finds mariadbd on PATH, following Homebrew's symlinks.
-func defaultBinDir() string {
-	p, err := exec.LookPath("mariadbd")
-	if err != nil {
-		return "/opt/homebrew/opt/mariadb/bin"
-	}
-	if real, err := filepath.EvalSymlinks(p); err == nil {
-		p = real
-	}
-	return filepath.Dir(p)
 }
