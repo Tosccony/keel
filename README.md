@@ -70,6 +70,8 @@ You need Go (the version in `go.mod`) and a C compiler, because the window toolk
 Then:
 
 ```sh
+go test ./...                         # tests start real MariaDB servers; skipped if MariaDB isn't installed
+go run ./cmd/keel-lab start           # start MariaDB from ~/personal/keel-lab on port 3307
 go run ./cmd/keel                     # run the app
 scripts/package-macos.sh 0.1.0        # macOS: dist/Keel-macOS.dmg
 scripts/package-linux.sh 0.1.0        # Linux: dist/*.deb, *.rpm, *.tar.gz (needs nfpm)
@@ -82,6 +84,8 @@ On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel
 | Path | What it is |
 |---|---|
 | `cmd/keel/` | App entry point (placeholder window for now) |
+| `internal/mariadb/` | Starts MariaDB safely: its own process group, a port check, and a readiness ping. It never kills the server |
+| `cmd/keel-lab/` | Developer tool for trying the server code against a local MariaDB. Not shipped |
 | `packaging/windows/` | Inno Setup script for the `.exe` installer |
 | `packaging/macos/` | `Info.plist` for `Keel.app` |
 | `packaging/linux/` | `.desktop` entry and nfpm config for `.deb` and `.rpm` |
