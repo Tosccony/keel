@@ -64,7 +64,7 @@ To test the builds without publishing, open **Actions > Release > Run workflow**
 You need Go (the version in `go.mod`) and a C compiler, because the window toolkit ([Fyne](https://fyne.io)) uses cgo:
 
 - **macOS:** Xcode Command Line Tools
-- **Linux:** `gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev`
+- **Linux:** `gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols`
 - **Windows:** MSYS2 with `mingw-w64-x86_64-gcc`
 
 Then:
