@@ -73,16 +73,21 @@ type ui struct {
 	busy       bool // a start or stop is in progress
 	pidNow     int  // the PID last shown; 0 means stopped
 	repairMode bool // the running MariaDB was left in repair mode by an interrupted repair
+	setUp      bool // the data folder exists; false until the first start creates it
 	port       int  // the port shown; the server's Port is only touched under mu
 
-	// choosePort, if set, runs before each start to move MariaDB off a
-	// port another program holds. It returns a note for the log.
-	choosePort func(context.Context, *mariadb.Server) (string, error)
+	// prepare, if set, runs before each start: it creates the data folder
+	// on the first start and moves MariaDB off a port another program
+	// holds. It returns a note for the log.
+	prepare func(context.Context, *mariadb.Server) (string, error)
 
 	// recheck runs after each start or stop: checkNow, except in tests,
 	// where Fyne's test driver would run the check's result on another
 	// goroutine instead of the UI thread.
 	recheck func()
+	// later runs f on the UI thread after d. Tests replace it, for the
+	// same reason as recheck.
+	later func(d time.Duration, f func())
 
 	// MariaDB's card.
 	name    *widget.Label
@@ -114,6 +119,7 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 		win:          win,
 		server:       server,
 		port:         server.Port,
+		setUp:        true,
 		name:         widget.NewLabel("MariaDB"),
 		version:      muted(""),
 		detail:       muted(""),
@@ -170,6 +176,7 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 		fyne.Do(func() { u.log(progressLevel(msg), msg) })
 	}
 	u.recheck = u.checkNow
+	u.later = func(d time.Duration, f func()) { time.AfterFunc(d, func() { fyne.Do(f) }) }
 	u.show(u.pidNow)
 	return u
 }
@@ -275,7 +282,7 @@ func (u *ui) detailText() string {
 	return fmt.Sprintf("Port %d", u.port)
 }
 
-// setPort shows a new port, after choosePort moved MariaDB.
+// setPort shows a new port, after prepare moved MariaDB.
 func (u *ui) setPort(port int) {
 	u.port = port
 	u.detail.SetText(u.detailText())
@@ -335,9 +342,9 @@ func (u *ui) runStart(withoutCopy bool) startResult {
 // startLocked is runStart for callers that already hold mu.
 func (u *ui) startLocked(ctx context.Context, withoutCopy bool) startResult {
 	var err error
-	if u.choosePort != nil {
+	if u.prepare != nil {
 		var note string
-		note, err = u.choosePort(ctx, u.server)
+		note, err = u.prepare(ctx, u.server)
 		if note != "" {
 			port := u.server.Port
 			fyne.Do(func() {
@@ -509,9 +516,11 @@ func (u *ui) checkNow() {
 		}
 		pid := u.server.RunningPID()
 		repairMode := pid != 0 && u.server.InRepairMode(pid)
+		setUp := u.server.IsSetUp()
 		u.mu.Unlock()
 		clean, why := u.server.LastShutdown() // reads files only; safe without the lock
 		fyne.Do(func() {
+			u.setUp = setUp
 			u.noteRepairMode(repairMode)
 			u.applyCheck(pid, clean, why)
 		})
@@ -565,11 +574,16 @@ func (u *ui) showShutdown(pid int, clean bool, why string) {
 	} else {
 		u.banner.Hide()
 	}
-	if stopped && clean {
+	switch {
+	case stopped && !u.setUp:
+		u.shutdown.SetText("Not set up yet: the first start creates MariaDB's data")
+		u.shutdown.Show()
+		u.shutdownIcon.Hide()
+	case stopped && clean:
 		u.shutdown.SetText("Last shutdown was clean")
 		u.shutdown.Show()
 		u.shutdownIcon.Show()
-	} else {
+	default:
 		u.shutdown.Hide()
 		u.shutdownIcon.Hide()
 	}
@@ -609,11 +623,9 @@ func (u *ui) copyActivity() {
 	fyne.CurrentApp().Clipboard().SetContent(strings.Join(u.logLines(), "\n"))
 	u.copyLog.SetText("Copied")
 	u.copyLog.SetIcon(theme.ConfirmIcon())
-	time.AfterFunc(2*time.Second, func() {
-		fyne.Do(func() {
-			u.copyLog.SetText("Copy")
-			u.copyLog.SetIcon(theme.ContentCopyIcon())
-		})
+	u.later(2*time.Second, func() {
+		u.copyLog.SetText("Copy")
+		u.copyLog.SetIcon(theme.ContentCopyIcon())
 	})
 }
 

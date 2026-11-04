@@ -1,5 +1,6 @@
-// Command keel-lab is a developer tool for trying Keel's server code against
-// a local MariaDB install. It isn't shipped in releases.
+// Command keel-lab is a developer tool for trying Keel's server code from
+// the command line, against the same MariaDB and folder the window would
+// use (see internal/setup). It isn't shipped in releases.
 //
 //	go run ./cmd/keel-lab init     # create the data folder in ~/personal/keel-lab
 //	go run ./cmd/keel-lab start    # start MariaDB (recovering first if needed)
@@ -26,12 +27,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tosccony/keel/internal/lab"
 	"github.com/Tosccony/keel/internal/mariadb"
+	"github.com/Tosccony/keel/internal/setup"
 )
 
 func main() {
-	opts := lab.Defaults()
+	opts := setup.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] init|start|status|check|stop|repair|backup|backups|restore NAME")
@@ -155,8 +156,8 @@ func restore(s *mariadb.Server, name string) {
 	fail(fmt.Errorf("no copy called %q; see keel-lab backups", name))
 }
 
-func start(ctx context.Context, opts lab.Options, s *mariadb.Server) {
-	note, err := opts.ChoosePort(ctx, s)
+func start(ctx context.Context, opts setup.Options, s *mariadb.Server) {
+	note, err := opts.Prepare(ctx, s)
 	if err != nil {
 		fail(err)
 	}

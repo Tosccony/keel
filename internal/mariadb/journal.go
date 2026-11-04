@@ -190,11 +190,23 @@ func needsRecovery(j journal, jerr error, ev logEvidence) (bool, string) {
 	}
 }
 
+// IsSetUp reports whether the data folder exists. Before the first start
+// it doesn't; Init creates it.
+func (s *Server) IsSetUp() bool { return dirExists(s.DataDir) }
+
 // LastShutdown reports whether MariaDB last shut down cleanly, according to
 // Keel's journal and MariaDB's log, and why not if it didn't. Start runs
 // the recovery steps whenever this says unclean. While the server is
 // running, the answer describes the current run, which hasn't stopped yet.
+//
+// Before the first start there's no data folder, and nothing to recover.
 func (s *Server) LastShutdown() (clean bool, reason string) {
+	if !dirExists(s.DataDir) {
+		if s.interruptedRestore() != "" {
+			return false, "A restore was interrupted, and the data folder is missing."
+		}
+		return true, ""
+	}
 	j, err := readJournal(s.journalFile())
 	dirty, why := needsRecovery(j, err, readLogEvidence(s.LogFile))
 	return !dirty, why

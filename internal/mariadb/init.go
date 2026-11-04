@@ -19,14 +19,17 @@ import (
 //
 // Init builds the folder under a temporary name and renames it into place,
 // so a failed or interrupted Init never leaves a half-made data folder.
+//
+// If the data folder is missing because a restore was interrupted, Init
+// refuses: a new, empty folder in its place would hide the user's data.
 func (s *Server) Init(ctx context.Context) error {
-	if runtime.GOOS == "windows" {
-		return errors.New("mariadb: Init isn't supported on Windows yet")
-	}
 	if _, err := os.Stat(s.DataDir); err == nil {
 		return nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("mariadb: data folder: %w", err)
+	}
+	if old := s.interruptedRestore(); old != "" {
+		return s.interruptedRestoreError(old)
 	}
 	parent := filepath.Dir(s.DataDir)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -47,13 +50,7 @@ func (s *Server) Init(ctx context.Context) error {
 	defer os.RemoveAll(tmp) // only does anything if Init fails before the rename
 
 	s.progress("Creating MariaDB's data folder.")
-	cmd := exec.CommandContext(ctx, filepath.Join(s.BinDir, "mariadb-install-db"),
-		"--no-defaults",
-		"--basedir="+filepath.Dir(s.BinDir),
-		"--datadir="+tmp,
-		"--auth-root-authentication-method=normal", // root with no password, like XAMPP
-		"--skip-test-db",
-	)
+	cmd := exec.CommandContext(ctx, filepath.Join(s.BinDir, exe("mariadb-install-db")), installArgs(s.BinDir, tmp)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mariadb: mariadb-install-db failed: %w\n%s", err, lastLines(string(out), 10))
 	}
@@ -66,6 +63,25 @@ func (s *Server) Init(ctx context.Context) error {
 	}
 	s.progress("Data folder ready: " + s.DataDir)
 	return nil
+}
+
+// installArgs are mariadb-install-db's options. On Linux and macOS it's a
+// script; on Windows it's a different program, mariadb-install-db.exe,
+// with options of its own. Either way root gets no password, like XAMPP,
+// and only works from this computer.
+func installArgs(binDir, dataDir string) []string {
+	if runtime.GOOS == "windows" {
+		// It also writes a my.ini into the data folder, which Keel ignores:
+		// mariadbd always runs with --no-defaults.
+		return []string{"--datadir=" + dataDir}
+	}
+	return []string{
+		"--no-defaults",
+		"--basedir=" + filepath.Dir(binDir),
+		"--datadir=" + dataDir,
+		"--auth-root-authentication-method=normal",
+		"--skip-test-db",
+	}
 }
 
 func lastLines(s string, n int) string {

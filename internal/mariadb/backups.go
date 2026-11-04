@@ -227,6 +227,12 @@ func removeLeftovers(dir, prefix string) {
 	}
 }
 
+func (s *Server) interruptedRestoreError(old string) error {
+	return fmt.Errorf("mariadb: data folder %s is missing because a restore was interrupted. "+
+		"The data from before the restore is in %s; restore a copy, or rename that folder back to %s",
+		s.DataDir, old, filepath.Base(s.DataDir))
+}
+
 // interruptedRestore returns the old data folder left behind by a restore
 // that was interrupted between its two renames, or "".
 func (s *Server) interruptedRestore() string {

@@ -253,3 +253,23 @@ func TestBackUpAndRestoreWithMariaDB(t *testing.T) {
 		t.Errorf("want 2 copies (backup + pre-restore), got %d", len(backups))
 	}
 }
+
+// With the data folder missing because a restore was interrupted, setup
+// must not create a new, empty one in its place.
+func TestInitRefusesAfterInterruptedRestore(t *testing.T) {
+	dir := t.TempDir()
+	s := &Server{BinDir: t.TempDir(), DataDir: filepath.Join(dir, "data")}
+	old := filepath.Join(dir, replacedPrefix+"2026-11-03-120000")
+	os.MkdirAll(old, 0o755)
+
+	err := s.Init(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "restore was interrupted") {
+		t.Errorf("Init: %v", err)
+	}
+	if s.IsSetUp() {
+		t.Error("Init created a data folder over the interrupted restore")
+	}
+	if clean, why := s.LastShutdown(); clean || !strings.Contains(why, "restore was interrupted") {
+		t.Errorf("LastShutdown: clean=%v %q", clean, why)
+	}
+}

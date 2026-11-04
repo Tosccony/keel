@@ -6,7 +6,7 @@ A local web stack for Windows, macOS and Linux: Apache, PHP, MariaDB and phpMyAd
 - **Picks a free port on its own.** It starts on 8080. If that port is taken, it moves to the next free one and tells you.
 - **No accounts.** No sign-in, no telemetry.
 
-> **Status: early.** The window can start and stop MariaDB safely, but Keel doesn't bundle MariaDB yet. For now it controls the development setup in `internal/lab` (a MariaDB you install yourself, with its data in `~/personal/keel-lab`).
+> **Status: early.** The window can start, stop, repair, back up and restore MariaDB safely. Shipping MariaDB inside the installers is in progress (see [docs/bundled-mariadb.md](docs/bundled-mariadb.md)); until then a development build controls a MariaDB you install yourself, with its data in `~/personal/keel-lab`.
 
 ## Install
 
@@ -88,14 +88,17 @@ On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel
 | Path | What it is |
 |---|---|
 | `cmd/keel/` | The Keel window: a card per service with Start/Stop, a warning after an unclean shutdown, and an activity log. `icon.svg` is the logo; `theme.go` holds the light and dark colours |
-| `internal/lab/` | Development setup shared by `keel` and `keel-lab` until MariaDB is bundled. Remembers a port Keel moved to in `keel-settings.json` |
+| `internal/setup/` | Which MariaDB Keel runs and where its files live: the bundled one and the user's app data folder in an installed Keel, or the lab in a development build. Creates the data folder on the first start, and remembers a port Keel moved to in `keel-settings.json` |
 | `internal/ports/` | Finds free ports, and names the program holding a taken one |
 | `internal/mariadb/` | Starts and stops MariaDB safely, and recovers from unclean shutdowns: a crash journal, a safety copy before recovery, a check of every table, Repair, Back up and Restore, and a lock so two Keels never act on the same data folder at once |
-| `cmd/keel-lab/` | Developer tool for trying the server code against a local MariaDB. Not shipped |
+| `cmd/keel-lab/` | Command-line tool for trying the server code (start, stop, check, repair, backup, restore). Not shipped |
 | `packaging/windows/` | Inno Setup script and icon for the `.exe` installer |
 | `packaging/macos/` | `Info.plist` and icon for `Keel.app` |
 | `packaging/linux/` | `.desktop` entry, icon, and nfpm config for `.deb` and `.rpm` |
-| `scripts/` | Packaging scripts the release workflow runs, and `make-icons.sh` |
+| `scripts/` | Packaging scripts the release workflow runs; the MariaDB scripts (`fetch-mariadb.sh`, `build-mariadb.sh`, `trim-mariadb.sh`, `test-mariadb-runtime.sh`); and `make-icons.sh` |
+| `packaging/mariadb/mariadb.env` | The MariaDB version Keel ships, with the checksum of every download |
 | `install.sh`, `install.ps1` | One-line installers for the latest release |
 | `.github/workflows/release.yml` | Tag-triggered build and release |
+| `.github/workflows/mariadb.yml` | Prepares and tests the MariaDB that Keel ships, on all three systems (run by hand) |
 | `docs/testing.md` | Every crash-safety test case, automated and still to do |
+| `docs/bundled-mariadb.md` | How Keel ships MariaDB, and why |

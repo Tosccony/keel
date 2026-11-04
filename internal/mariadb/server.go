@@ -285,7 +285,7 @@ func (s *Server) validate() error {
 	info, err := os.Stat(s.DataDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		if old := s.interruptedRestore(); old != "" {
-			return fmt.Errorf("mariadb: data folder %s is missing because a restore was interrupted. The data from before the restore is in %s; restore a copy, or rename that folder back to %s", s.DataDir, old, filepath.Base(s.DataDir))
+			return s.interruptedRestoreError(old)
 		}
 		return fmt.Errorf("mariadb: data folder %s doesn't exist; create it with mariadb-install-db first", s.DataDir)
 	}

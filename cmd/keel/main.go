@@ -1,8 +1,8 @@
 // Command keel opens the Keel control window.
 //
-// For now it controls the development MariaDB described in internal/lab:
-// Homebrew's mariadbd with a data folder in ~/personal/keel-lab on port 3307.
-// Closing the window leaves MariaDB running.
+// An installed Keel runs the MariaDB that came with it; a development build
+// runs the lab setup (see internal/setup). Closing the window leaves
+// MariaDB running.
 package main
 
 import (
@@ -13,14 +13,14 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
-	"github.com/Tosccony/keel/internal/lab"
+	"github.com/Tosccony/keel/internal/setup"
 )
 
 // version is set at build time: go build -ldflags "-X main.version=1.2.3".
 var version = "dev"
 
 func main() {
-	opts := lab.Defaults()
+	opts := setup.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -35,7 +35,7 @@ func main() {
 	w := a.NewWindow("Keel")
 	server := opts.Server()
 	u := newUI(w, server)
-	u.choosePort = opts.ChoosePort
+	u.prepare = opts.Prepare
 	w.SetContent(u.content())
 	w.Resize(fyne.NewSize(780, 540))
 

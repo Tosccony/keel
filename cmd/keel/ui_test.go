@@ -33,6 +33,7 @@ func newThemedTestUI(t *testing.T, th fyne.Theme) (*ui, fyne.Window) {
 	w := test.NewTempWindow(t, nil)
 	u := newUI(w, server)
 	u.recheck = func() {}
+	u.later = func(time.Duration, func()) {}
 	w.SetContent(u.content())
 	w.Resize(fyne.NewSize(780, 540))
 	return u, w
@@ -175,7 +176,7 @@ func TestProgressLevel(t *testing.T) {
 
 func TestStartMovesPortAndSaysWhy(t *testing.T) {
 	u, _ := newTestUI(t)
-	u.choosePort = func(_ context.Context, s *mariadb.Server) (string, error) {
+	u.prepare = func(_ context.Context, s *mariadb.Server) (string, error) {
 		s.Port = 4406
 		return "Port 3307 is in use by mysqld (PID 412) from XAMPP, so MariaDB will use port 4406 from now on.", nil
 	}
@@ -196,7 +197,7 @@ func TestStartMovesPortAndSaysWhy(t *testing.T) {
 
 func TestNoFreePortStopsTheStart(t *testing.T) {
 	u, _ := newTestUI(t)
-	u.choosePort = func(context.Context, *mariadb.Server) (string, error) {
+	u.prepare = func(context.Context, *mariadb.Server) (string, error) {
 		return "", errors.New("port 3307 is in use by a program (PID 9), and there's no free port from 3308 to 3407")
 	}
 	u.finishStart(u.runStart(false))
@@ -289,6 +290,20 @@ func TestRepairModeIsShown(t *testing.T) {
 	u.noteRepairMode(false)
 	if u.status.Text != "Running" {
 		t.Errorf("after repair mode ended: %q", u.status.Text)
+	}
+}
+
+func TestNotSetUpYetIsShown(t *testing.T) {
+	u, _ := newTestUI(t)
+	u.setUp = false
+	u.applyCheck(0, true, "")
+	if !u.shutdown.Visible() || !strings.Contains(u.shutdown.Text, "Not set up yet") || u.shutdownIcon.Visible() || u.banner.Visible() {
+		t.Errorf("status bar %q (shown %v)", u.shutdown.Text, u.shutdown.Visible())
+	}
+	u.setUp = true
+	u.applyCheck(0, true, "")
+	if u.shutdown.Text != "Last shutdown was clean" {
+		t.Errorf("once set up: %q", u.shutdown.Text)
 	}
 }
 

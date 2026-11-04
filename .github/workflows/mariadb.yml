@@ -1,0 +1,135 @@
+# Prepares the MariaDB that Keel ships (packaging/mariadb/mariadb.env), and
+# tests it on each system with Keel's own code (scripts/test-mariadb-runtime.sh).
+# - Windows and Linux: MariaDB's official builds, trimmed.
+# - macOS: built from MariaDB's source (MariaDB publishes no macOS builds),
+#   for Apple Silicon and Intel, then joined into one universal build.
+#
+# Run it by hand (Actions tab > MariaDB > Run workflow) when the version
+# changes. With "publish" ticked, it attaches the three builds and the
+# source code (MariaDB's licence, the GPL, requires offering it) to a
+# release named mariadb-<version>, which the Release workflow downloads.
+# That release is a pre-release, so Keel's "latest" links don't move.
+name: MariaDB
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the builds as a release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: scripts/fetch-mariadb.sh windows
+      - run: scripts/test-mariadb-runtime.sh dist/mariadb/windows-x86_64/mariadb
+      - run: tar -czf mariadb-windows-x86_64.tar.gz -C dist/mariadb/windows-x86_64 mariadb
+      - uses: actions/upload-artifact@v6
+        with:
+          name: mariadb-windows-x86_64
+          path: mariadb-windows-x86_64.tar.gz
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: scripts/fetch-mariadb.sh linux
+      - run: scripts/test-mariadb-runtime.sh dist/mariadb/linux-x86_64/mariadb
+      - run: tar -czf mariadb-linux-x86_64.tar.gz -C dist/mariadb/linux-x86_64 mariadb
+      - uses: actions/upload-artifact@v6
+        with:
+          name: mariadb-linux-x86_64
+          path: mariadb-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  macos-build:
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build tools
+        run: brew install cmake bison
+      - run: scripts/build-mariadb.sh ${{ matrix.arch }}
+      - run: tar -czf mariadb-macos-${{ matrix.arch }}.tar.gz -C dist/mariadb/macos-${{ matrix.arch }} mariadb
+      - uses: actions/upload-artifact@v6
+        with:
+          name: mariadb-macos-${{ matrix.arch }}
+          path: mariadb-macos-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  macos:
+    needs: macos-build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: mariadb-macos-*
+          merge-multiple: true
+      - name: Join into a universal build
+        run: |
+          for arch in arm64 x86_64; do
+            mkdir -p "dist/mariadb/macos-$arch"
+            tar -xzf "mariadb-macos-$arch.tar.gz" -C "dist/mariadb/macos-$arch"
+          done
+          scripts/merge-mariadb-macos.sh dist/mariadb/macos-arm64/mariadb \
+            dist/mariadb/macos-x86_64/mariadb dist/mariadb/macos-universal/mariadb
+      - run: scripts/test-mariadb-runtime.sh dist/mariadb/macos-universal/mariadb
+      - run: tar -czf mariadb-macos-universal.tar.gz -C dist/mariadb/macos-universal mariadb
+      - uses: actions/upload-artifact@v6
+        with:
+          name: mariadb-macos-universal
+          path: mariadb-macos-universal.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: mariadb-*
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source packaging/mariadb/mariadb.env
+          V="$MARIADB_VERSION"
+          curl -fsSL --retry 3 -o "mariadb-$V-source.tar.gz" \
+            "https://archive.mariadb.org/mariadb-$V/source/mariadb-$V.tar.gz"
+          echo "$MARIADB_SOURCE_SHA256  mariadb-$V-source.tar.gz" | sha256sum -c -
+          for p in windows-x86_64 linux-x86_64 macos-universal; do
+            mv "mariadb-$p.tar.gz" "mariadb-$V-$p.tar.gz"
+          done
+          sha256sum mariadb-"$V"-*.tar.gz > SHA256SUMS.txt
+          gh release create "mariadb-$V" mariadb-"$V"-*.tar.gz SHA256SUMS.txt \
+            --title "MariaDB $V for Keel" --prerelease \
+            --notes "MariaDB $V as Keel ships it: MariaDB's official Windows and Linux builds, trimmed to what Keel uses, and a macOS build made from MariaDB's source with scripts/build-mariadb.sh. MariaDB is licensed under the GNU GPL v2; its source code is attached."

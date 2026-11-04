@@ -161,6 +161,7 @@ func TestReadLogEvidenceReadsOnlyTheTail(t *testing.T) {
 func TestLastShutdown(t *testing.T) {
 	dir := t.TempDir()
 	s := &Server{DataDir: filepath.Join(dir, "data"), LogFile: filepath.Join(dir, "error.log")}
+	os.Mkdir(s.DataDir, 0o755) // an existing data folder; before setup there's nothing to recover
 	if clean, why := s.LastShutdown(); clean || !strings.Contains(why, "no record") {
 		t.Errorf("no journal: clean=%v (%s)", clean, why)
 	}
