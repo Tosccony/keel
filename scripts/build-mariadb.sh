@@ -37,10 +37,18 @@ OUT="$ROOT/dist/mariadb/$OS-$ARCH/mariadb"
 TARBALL="$ROOT/dist/mariadb-build/mariadb-$MARIADB_VERSION.tar.gz"
 
 mkdir -p "$WORK" "$(dirname "$TARBALL")"
+# MariaDB's archive, then two long-standing mirrors; the checksum below
+# makes any of them safe.
 if [ ! -f "$TARBALL" ]; then
-  curl -fsSL -o "$TARBALL.part" \
-    "https://archive.mariadb.org/mariadb-$MARIADB_VERSION/source/mariadb-$MARIADB_VERSION.tar.gz"
-  mv "$TARBALL.part" "$TARBALL"
+  for base in https://archive.mariadb.org https://ftp.osuosl.org/pub/mariadb https://mirrors.xtom.com/mariadb; do
+    if curl -fsSL --retry 4 --retry-all-errors --retry-delay 5 -o "$TARBALL.part" \
+      "$base/mariadb-$MARIADB_VERSION/source/mariadb-$MARIADB_VERSION.tar.gz"; then
+      mv "$TARBALL.part" "$TARBALL"
+      break
+    fi
+    echo "build-mariadb: $base failed; trying the next mirror" >&2
+  done
+  [ -f "$TARBALL" ] || { echo "build-mariadb: couldn't download MariaDB's source" >&2; exit 1; }
 fi
 echo "$MARIADB_SOURCE_SHA256  $TARBALL" | shasum -a 256 -c -
 

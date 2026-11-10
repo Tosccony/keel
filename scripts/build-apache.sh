@@ -36,24 +36,37 @@ mkdir -p "$SRC"
 sha256() {
   if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
-# fetch NAME URL SHA256: download into src/ once, and check it every time.
+# fetch NAME SHA256 URL...: download into src/ once, trying each URL in
+# turn (the checksum makes any mirror safe), and check it every time.
 fetch() {
-  local file="$SRC/$1"
+  local file="$SRC/$1" sum="$2" url
+  shift 2
   if [ ! -f "$file" ]; then
-    curl -fsSL --retry 3 -o "$file.part" "$2"
-    mv "$file.part" "$file"
+    for url in "$@"; do
+      if curl -fsSL --retry 4 --retry-all-errors --retry-delay 5 -o "$file.part" "$url"; then
+        mv "$file.part" "$file"
+        break
+      fi
+      echo "build-apache: $url failed; trying the next source" >&2
+    done
+    [ -f "$file" ] || { echo "build-apache: couldn't download $1" >&2; exit 1; }
   fi
-  if [ "$(sha256 "$file")" != "$3" ]; then
+  if [ "$(sha256 "$file")" != "$sum" ]; then
     echo "build-apache: $1 doesn't match its checksum" >&2
     exit 1
   fi
 }
-fetch "httpd-$HTTPD_VERSION.tar.bz2" "https://archive.apache.org/dist/httpd/httpd-$HTTPD_VERSION.tar.bz2" "$HTTPD_SHA256"
-fetch "apr-$APR_VERSION.tar.bz2" "https://archive.apache.org/dist/apr/apr-$APR_VERSION.tar.bz2" "$APR_SHA256"
-fetch "apr-util-$APRUTIL_VERSION.tar.bz2" "https://archive.apache.org/dist/apr/apr-util-$APRUTIL_VERSION.tar.bz2" "$APRUTIL_SHA256"
-fetch "pcre2-$PCRE2_VERSION.tar.bz2" "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE2_VERSION/pcre2-$PCRE2_VERSION.tar.bz2" "$PCRE2_SHA256"
-fetch "expat-$EXPAT_VERSION.tar.xz" "https://github.com/libexpat/libexpat/releases/download/$EXPAT_TAG/expat-$EXPAT_VERSION.tar.xz" "$EXPAT_SHA256"
-fetch "openssl-$OPENSSL_VERSION.tar.gz" "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" "$OPENSSL_SHA256"
+# Apache's CDN only has current releases; its archive has every one.
+apache() { echo "https://dlcdn.apache.org/$1" "https://archive.apache.org/dist/$1"; }
+# shellcheck disable=SC2046 # apache's two URLs are meant to split
+fetch "httpd-$HTTPD_VERSION.tar.bz2" "$HTTPD_SHA256" $(apache "httpd/httpd-$HTTPD_VERSION.tar.bz2")
+# shellcheck disable=SC2046
+fetch "apr-$APR_VERSION.tar.bz2" "$APR_SHA256" $(apache "apr/apr-$APR_VERSION.tar.bz2")
+# shellcheck disable=SC2046
+fetch "apr-util-$APRUTIL_VERSION.tar.bz2" "$APRUTIL_SHA256" $(apache "apr/apr-util-$APRUTIL_VERSION.tar.bz2")
+fetch "pcre2-$PCRE2_VERSION.tar.bz2" "$PCRE2_SHA256" "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE2_VERSION/pcre2-$PCRE2_VERSION.tar.bz2"
+fetch "expat-$EXPAT_VERSION.tar.xz" "$EXPAT_SHA256" "https://github.com/libexpat/libexpat/releases/download/$EXPAT_TAG/expat-$EXPAT_VERSION.tar.xz"
+fetch "openssl-$OPENSSL_VERSION.tar.gz" "$OPENSSL_SHA256" "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz"
 
 rm -rf "$WORK"
 mkdir -p "$WORK" "$DEPS"
