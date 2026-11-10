@@ -37,9 +37,13 @@ if [ -d "$RUNTIMES" ]; then
   done
   # Each program and plugin needs its own signature: Apple Silicon won't
   # run unsigned code, and the app's signature only seals them as files.
-  find "$APP/Contents/Resources" -type f | while read -r f; do
-    if file "$f" | grep -q "Mach-O"; then codesign --force --sign - "$f"; fi
-  done
+  # Only programs and libraries can be Mach-O; phpMyAdmin's thousands of
+  # PHP files needn't be looked at.
+  find "$APP/Contents/Resources/mariadb" "$APP/Contents/Resources/apache" "$APP/Contents/Resources/php" \
+    -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
+    while IFS= read -r -d '' f; do
+      if file -b "$f" | grep -q "^Mach-O"; then codesign --force --sign - "$f"; fi
+    done
 else
   echo "package-macos: no runtimes in $RUNTIMES; building Keel without them" >&2
 fi

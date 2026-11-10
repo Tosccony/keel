@@ -168,6 +168,13 @@ func (w *webService) Menu() []*fyne.MenuItem {
 	})
 	pma.Icon = theme.StorageIcon()
 	pma.Disabled = w.opts.PHPMyAdmin() == ""
+	https := fyne.NewMenuItem(fmt.Sprintf("Open with HTTPS (port %d)", w.server.HTTPSPort), func() {
+		if link, err := url.Parse(fmt.Sprintf("https://localhost:%d/", w.server.HTTPSPort)); err == nil {
+			fyne.CurrentApp().OpenURL(link)
+		}
+	})
+	https.Icon = theme.VisibilityIcon()
+	https.Disabled = w.server.HTTPSPort == 0
 	on := w.settings.Perl()
 	perl := fyne.NewMenuItem("Run Perl scripts (.pl, .cgi)", func() {
 		if w.runTask != nil {
@@ -178,6 +185,7 @@ func (w *webService) Menu() []*fyne.MenuItem {
 	perl.Checked = on
 	return []*fyne.MenuItem{
 		pma,
+		https,
 		fyne.NewMenuItemSeparator(),
 		item("Apache settings", theme.SettingsIcon(), w.server.CustomConf(), true),
 		item("PHP settings", theme.SettingsIcon(), w.server.CustomIni(), true),

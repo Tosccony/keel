@@ -29,6 +29,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--sendmail" {
 		os.Exit(runSendmail(os.Args[2:]))
 	}
+	setup.ClearQuarantine() // before anything runs a bundled program
 	opts := setup.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -39,7 +40,6 @@ func main() {
 		return
 	}
 
-	setup.ClearQuarantine() // before anything runs a bundled program
 	a := app.NewWithID("io.github.tosccony.keel")
 	a.Settings().SetTheme(keelTheme{})
 	a.SetIcon(appIcon)
@@ -47,6 +47,7 @@ func main() {
 	server := opts.Server()
 	u := newUI(w, server)
 	u.prepare = opts.Prepare
+	u.clientDir = opts.ClientDir()
 	settings := opts.Settings()
 	u.settings = settings
 	webSvc := newWebService(opts)

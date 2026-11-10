@@ -4,8 +4,11 @@ package mariadb
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 const binaryName = "mariadbd.exe"
@@ -22,8 +25,32 @@ func detach(cmd *exec.Cmd) {
 	}
 }
 
-// nudge asks again over SQL. Windows has no SIGTERM, and the console-control
-// events it does have would also reach Keel.
+// nudge sets the shutdown event mariadbd makes on Windows,
+// "MySQLShutdown<PID>", which starts the same clean shutdown as SQL's
+// SHUTDOWN but needs no account, so it works after a student sets a root
+// password. (Windows has no SIGTERM, and its console-control events would
+// also reach Keel.) If the event can't be set, it asks over SQL again.
+// It re-checks the process first, in case its number was reused.
 func (s *Server) nudge(ctx context.Context, pid int) error {
-	return s.askShutdown(ctx, pid)
+	if !isServerFor(pid, s.DataDir) {
+		return nil // already gone
+	}
+	if err := setShutdownEvent(pid); err != nil {
+		s.progress("Couldn't use MariaDB's shutdown event (" + err.Error() + "); asking over SQL again.")
+		return s.askShutdown(ctx, pid)
+	}
+	return nil
+}
+
+func setShutdownEvent(pid int) error {
+	name, err := windows.UTF16PtrFromString(fmt.Sprintf("MySQLShutdown%d", pid))
+	if err != nil {
+		return err
+	}
+	h, err := windows.OpenEvent(windows.EVENT_MODIFY_STATE, false, name)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+	return windows.SetEvent(h)
 }

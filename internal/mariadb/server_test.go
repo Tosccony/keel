@@ -284,6 +284,8 @@ func newTestServer(t *testing.T) *Server {
 		Port:    freePort(t),
 		Socket:  shortSocketPath(t, dir),
 		LogFile: filepath.Join(dir, "error.log"),
+		// For running these tests on Windows on ARM (see Server.NoTLS).
+		NoTLS: os.Getenv("KEEL_TEST_NO_TLS") != "",
 	}
 	if err := copyTree(filepath.Join(template.dir, "data"), s.DataDir); err != nil {
 		t.Fatal(err)

@@ -2,7 +2,6 @@ package mariadb
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -65,8 +64,9 @@ func (s *Server) shutdown(ctx context.Context, pid int) (StopResult, error) {
 		s.progress("Couldn't update Keel's journal: " + err.Error())
 	}
 	s.progress("Asking MariaDB to shut down.")
-	if err := s.askShutdown(ctx, pid); err != nil {
-		s.progress("Couldn't ask over SQL (" + err.Error() + ").")
+	askErr := s.askShutdown(ctx, pid)
+	if askErr != nil {
+		s.progress("Couldn't ask over SQL (" + askErr.Error() + ").")
 	} else {
 		s.progress("Waiting for MariaDB to finish writing to disk…")
 		if s.waitExit(ctx, pid, orDefault(s.StopTimeout, defaultStopTimeout)) {
@@ -81,7 +81,12 @@ func (s *Server) shutdown(ctx context.Context, pid int) (StopResult, error) {
 	if !isServerFor(pid, s.DataDir) { // it finished just now
 		return s.stopped(res, began, logStart), nil
 	}
-	s.progress("MariaDB is still running. Asking again.")
+	if askErr != nil {
+		// For example, root has a password Keel doesn't know.
+		s.progress("Asking MariaDB another way.")
+	} else {
+		s.progress("MariaDB is still running. Asking again.")
+	}
 	if err := s.nudge(ctx, pid); err != nil {
 		s.progress("The second request failed (" + err.Error() + ").")
 	}
@@ -168,7 +173,7 @@ func (s *Server) askShutdown(ctx context.Context, pid int) error {
 	if p := serverPort(pid); p != 0 {
 		port = p
 	}
-	db, err := sql.Open("mysql", s.dsnFor(port))
+	db, _, err := s.connect(ctx, port)
 	if err != nil {
 		return err
 	}
@@ -247,6 +252,17 @@ func stillShuttingDown(err error) error {
 func logSaysShutdownComplete(path string, from int64) bool {
 	for _, line := range readLinesFrom(path, from) {
 		if strings.HasSuffix(strings.TrimSpace(line), ": Shutdown complete") {
+			return true
+		}
+	}
+	return false
+}
+
+// logSaysReady reports whether MariaDB's log, from offset from, says the
+// server is ready for connections.
+func logSaysReady(path string, from int64) bool {
+	for _, line := range readLinesFrom(path, from) {
+		if strings.Contains(line, "ready for connections") {
 			return true
 		}
 	}

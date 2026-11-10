@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/Tosccony/keel/internal/setup"
 )
@@ -157,5 +160,25 @@ func TestPHPMyAdminReachesMariaDB(t *testing.T) {
 	}
 	if strings.Contains(body, "Deprecated:") {
 		t.Logf("PHP %s shows deprecation notices in phpMyAdmin (production ships PHP 8.4)", webSvc.php)
+	}
+
+	// A student gives root a password: phpMyAdmin now shows its login page
+	// instead of XAMPP's "Access denied" error, without a restart.
+	sqlDB, err := sql.Open("mysql", "root@tcp(127.0.0.1:"+strconv.Itoa(db.Port)+")/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	for _, host := range []string{"localhost", "127.0.0.1", "::1"} {
+		if _, err := sqlDB.Exec("ALTER USER IF EXISTS 'root'@'" + host + "' IDENTIFIED BY 'class-password'"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, body = httpGet(t, "http://127.0.0.1:"+strconv.Itoa(webSvc.server.Port)+"/phpmyadmin/")
+	if code != 200 || !strings.Contains(body, "pma_password") {
+		t.Errorf("phpMyAdmin with a root password: %d, no login form:\n%.800s", code, body)
+	}
+	if strings.Contains(body, "Access denied") {
+		t.Errorf("phpMyAdmin shows the access error instead of asking:\n%.800s", body)
 	}
 }

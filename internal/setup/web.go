@@ -42,10 +42,11 @@ func (o Options) Web() (*web.Server, error) {
 	}
 	st := o.Settings()
 	return &web.Server{
-		Runtime: rt,
-		Folder:  o.WebFolder(),
-		Port:    st.Port(PartWeb, DefaultPorts[PartWeb]),
-		FPMPort: st.Port(PartPHP, DefaultPorts[PartPHP]),
+		Runtime:   rt,
+		Folder:    o.WebFolder(),
+		Port:      st.Port(PartWeb, DefaultPorts[PartWeb]),
+		HTTPSPort: st.Port(PartHTTPS, DefaultPorts[PartHTTPS]),
+		FPMPort:   st.Port(PartPHP, DefaultPorts[PartPHP]),
 	}, nil
 }
 
@@ -66,6 +67,13 @@ func (o Options) PrepareWeb(ctx context.Context, s *web.Server, sendmail string)
 		return "", err
 	}
 	notes = append(notes, note)
+	https := s.HTTPSPort
+	if https != 0 {
+		if https, note, err = o.MovePort(ctx, PartHTTPS, "HTTPS", https); err != nil {
+			return "", err
+		}
+		notes = append(notes, note)
+	}
 	fpm := s.FPMPort
 	if s.PHPFPM != "" {
 		if fpm, note, err = o.MovePort(ctx, PartPHP, "PHP", fpm); err != nil {
@@ -73,7 +81,7 @@ func (o Options) PrepareWeb(ctx context.Context, s *web.Server, sendmail string)
 		}
 		notes = append(notes, note)
 	}
-	s.Sites, s.Port, s.FPMPort = sites, port, fpm
+	s.Sites, s.Port, s.HTTPSPort, s.FPMPort = sites, port, https, fpm
 	s.MariaDBPort = o.MariaDBPort()
 	s.MariaDBSocket = o.Server().Socket
 	s.MailPort = st.Port(PartMail, DefaultPorts[PartMail])

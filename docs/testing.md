@@ -193,6 +193,15 @@ Repair works even when MariaDB won't start. These cases use real MariaDB and the
 | 133 | Settings: ports, websites folder, autostart, FTP login and the rest survive a restart; parts saving at once don't undo each other; older files are read; a moved part skips other parts' ports | `internal/setup` tests |
 | 134 | Opening at sign-in: on and off (macOS LaunchAgent, Linux autostart entry; Windows' Run key in CI) | `TestStartAtSignIn` |
 | 135 | Every promised PHP extension, Keel's php.ini, a rewrite, Perl and phpMyAdmin on each system's built Apache and PHP | `scripts/test-web-runtime.sh` in the Web workflow |
+| 136 | A root password set by the student: Stop works on the first request, Start confirms the server at once, the tables can still be checked (through Keel's own account); a lost account password is replaced on the next start | `TestRootPasswordDoesntStopKeel`, `TestAccountIsRemade` |
+| 137 | No login at all (root has a password and Keel's account is gone): Start confirms the server from its log, Check says why it can't, Stop still shuts down cleanly (SIGTERM; MariaDB's shutdown event on Windows, run in the Windows VM) | `TestNoLogin` |
+| 138 | Windows on ARM: detected from inside the x64 emulator; MariaDB starts without TLS; a password login with MariaDB's own client works through Keel's client settings (run in the Windows VM) | `TestNeedsNoTLSOnlyOnARM`, `TestNoTLSPasswordLogin` |
+| 139 | `mariadb -u root` in Keel's terminal reaches Keel's MariaDB (its socket on macOS and Linux, its port on Windows), not a system MariaDB | `TestClientConfigReachesTheServer` |
+| 140 | macOS: the download quarantine is cleared from the programs inside Keel.app, once, and nothing outside an app bundle is touched | `TestClearQuarantine` |
+| 141 | A stop with a root password on each system's bundled MariaDB | `scripts/test-mariadb-runtime.sh` in the MariaDB workflow |
+| 142 | HTTPS certificate: covers localhost, 127.0.0.1 and ::1; key readable only by the user; kept while good, made again near expiry or when damaged | `TestCertificate` |
+| 143 | HTTPS serves the same site and PHP (`$_SERVER['HTTPS']` is on) with Keel's settings, on the development Apache and on each system's built Apache | `TestHTTPS`, `scripts/test-web-runtime.sh` |
+| 144 | The packaged Keel.app with all four runtimes: its signature verifies, and after marking every file as downloaded, Keel's start clears the marks and the bundled Apache, MariaDB and PHP run (without it, macOS holds them) | Manual, 2026-11-10 |
 
 ## Still to cover
 
@@ -200,23 +209,22 @@ These need real hardware, features that aren't built yet, or a longer run.
 
 | # | Case | Why it matters | Blocked on |
 |---|---|---|---|
-| 136 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
-| 137 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
-| 138 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
-| 139 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
-| 140 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
-| 141 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
-| 142 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
-| 143 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
-| 144 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
-| 145 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
-| 146 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
-| 147 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
-| 148 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
-| 149 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Manual test |
-| 150 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
-| 151 | A port held by another user's program or a system service (XAMPP's MySQL installed as a Windows service) | Windows names it; macOS and Linux can only say "another program" without admin rights | Windows support |
-| 152 | InnoDB damage that stops MariaDB starting at all | Repair can't fix InnoDB in place; the answer is a restore, or innodb_force_recovery and a dump | Manual test |
-| 153 | Keel killed while repair mode is running | MariaDB keeps running without account checks until stopped; the window should say so | Add an automated test |
-| 154 | Repair on Windows (aria_chk.exe, Windows paths) | The XAMPP errors are mostly seen on Windows | Windows support |
-| 155 | Root has a password on **Windows** | No SIGTERM there, so Stop can't shut MariaDB down and ends at the force-stop prompt. Needs Keel's own admin account or a named-pipe login | Windows support |
+| 145 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
+| 146 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
+| 147 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
+| 148 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
+| 149 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
+| 150 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
+| 151 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
+| 152 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
+| 153 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
+| 154 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
+| 155 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
+| 156 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
+| 157 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
+| 158 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Manual test |
+| 159 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
+| 160 | A port held by another user's program or a system service (XAMPP's MySQL installed as a Windows service) | Windows names it; macOS and Linux can only say "another program" without admin rights | Windows support |
+| 161 | InnoDB damage that stops MariaDB starting at all | Repair can't fix InnoDB in place; the answer is a restore, or innodb_force_recovery and a dump | Manual test |
+| 162 | Keel killed while repair mode is running | MariaDB keeps running without account checks until stopped; the window should say so | Add an automated test |
+| 163 | Repair on Windows (aria_chk.exe, Windows paths) | The XAMPP errors are mostly seen on Windows | Windows support |

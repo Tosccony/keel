@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"text/template"
+	"time"
 )
 
 // The config files Keel writes at every start. Each says so at the top and
@@ -46,7 +48,8 @@ ServerRoot "{{.Folder}}"
 DefaultRuntimeDir "{{.Run}}"
 PidFile "{{.Run}}/httpd.pid"
 Listen 127.0.0.1:{{.Port}}
-ServerName localhost:{{.Port}}
+{{if .HTTPSPort}}Listen 127.0.0.1:{{.HTTPSPort}} https
+{{end}}ServerName localhost:{{.Port}}
 {{range .Modules}}LoadModule {{.}}_module "{{$.ModulesDir}}/mod_{{.}}.so"
 {{end}}
 {{if .Windows}}# Some antivirus software breaks Windows' accept optimisations.
@@ -114,6 +117,17 @@ Alias /phpmyadmin "{{.PHPMyAdmin}}"
     SetEnv KEEL_PMA_TEMP "{{.Tmp}}/phpmyadmin/"
     SetEnv KEEL_PMA_CACHE "{{.Tmp}}/phpmyadmin/cache/"
 </Directory>
+{{end}}
+{{- if .HTTPSPort}}
+# HTTPS, with a certificate Keel made for this computer. Browsers warn
+# about it once, as with XAMPP's; everything else is the same as over HTTP.
+SSLSessionCache "shmcb:{{.Run}}/ssl_scache(512000)"
+<VirtualHost 127.0.0.1:{{.HTTPSPort}}>
+    ServerName localhost:{{.HTTPSPort}}
+    SSLEngine on
+    SSLCertificateFile "{{.CertFile}}"
+    SSLCertificateKeyFile "{{.KeyFile}}"
+</VirtualHost>
 {{end}}
 Include "{{.Conf}}/custom.conf"
 `))
@@ -209,8 +223,24 @@ $cfg['blowfish_secret'] = hex2bin({{php .Secret}});
 $i = 1;
 $cfg['Servers'][$i]['host'] = '127.0.0.1';
 $cfg['Servers'][$i]['port'] = {{php .MariaDBPort}};
-// Like XAMPP: in as root, with no password, without a login page.
-$cfg['Servers'][$i]['auth_type'] = 'config';
+// Like XAMPP: in as root, with no password, without a login page. Once
+// root has a password, phpMyAdmin shows its login page instead of XAMPP's
+// "Access denied" error.
+$keelRootHasPassword = (static function (int $port): bool {
+    if (!class_exists('mysqli')) {
+        return false;
+    }
+    $mode = (new mysqli_driver())->report_mode;
+    mysqli_report(MYSQLI_REPORT_OFF);
+    $db = @new mysqli('127.0.0.1', 'root', '', '', $port);
+    $denied = in_array($db->connect_errno, [1045, 1698], true);
+    if ($db->connect_errno === 0) {
+        $db->close();
+    }
+    mysqli_report($mode);
+    return $denied;
+})({{.MariaDBPort}});
+$cfg['Servers'][$i]['auth_type'] = $keelRootHasPassword ? 'cookie' : 'config';
 $cfg['Servers'][$i]['user'] = 'root';
 $cfg['Servers'][$i]['password'] = '';
 $cfg['Servers'][$i]['AllowNoPassword'] = true;
@@ -230,7 +260,8 @@ const pmaCustom = `<?php
 // Your own phpMyAdmin settings. Keel never changes this file. It's read
 // after Keel's settings, so what you set here wins.
 //
-// If you give MariaDB's root user a password, have phpMyAdmin ask for it:
+// Once MariaDB's root user has a password, phpMyAdmin asks for it by
+// itself. To always get the login page, even without one:
 //   $cfg['Servers'][1]['auth_type'] = 'cookie';
 `
 
@@ -254,6 +285,11 @@ var windowsExtensions = []string{
 func (s *Server) writeConfig() error {
 	for _, dir := range []string{s.conf(), s.logs(), s.run(), s.tmp(), s.sessions(), filepath.Join(s.conf(), "php.d")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	if s.HTTPSPort != 0 {
+		if err := s.ensureCert(time.Now()); err != nil {
 			return err
 		}
 	}
@@ -341,13 +377,18 @@ func (s *Server) vars() map[string]any {
 		"PHPModule": slash(s.PHPModule), "Sendmail": s.Sendmail, "Timezone": s.Timezone,
 		"PHPMyAdmin": slash(s.PHPMyAdmin), "ExtensionDir": slash(s.ExtensionDir),
 		"Token": s.token, "Perl": s.Perl,
+		"HTTPSPort": s.HTTPSPort, "CertFile": slash(s.CertFile()), "KeyFile": slash(s.KeyFile()),
 	}
 	v["Windows"] = runtime.GOOS == "windows"
 	if s.ModulesDir != "" {
-		v["Modules"] = unixModules
+		modules := unixModules
 		if runtime.GOOS == "windows" {
-			v["Modules"] = windowsModules
+			modules = windowsModules
 		}
+		if s.HTTPSPort != 0 {
+			modules = append(slices.Clip(modules), "socache_shmcb", "ssl")
+		}
+		v["Modules"] = modules
 	}
 	if s.PHPModule != "" && s.ExtensionDir != "" {
 		v["Extensions"] = windowsExtensions

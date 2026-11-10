@@ -43,6 +43,7 @@ type Server struct {
 	Sites  string // the websites folder (DocumentRoot)
 
 	Port          int    // HTTP
+	HTTPSPort     int    // HTTPS, with a certificate Keel makes (CertFile); 0 for none
 	FPMPort       int    // PHP-FPM, on 127.0.0.1
 	MariaDBPort   int    // for PHP's defaults
 	MariaDBSocket string // for PHP's "localhost" (macOS, Linux)

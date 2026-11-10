@@ -106,8 +106,13 @@ func (o Options) Server() *mariadb.Server {
 		Port:    o.MariaDBPort(),
 		Socket:  filepath.Join(o.Folder, "mysql.sock"),
 		LogFile: filepath.Join(o.Folder, "mariadb.log"),
+		NoTLS:   needsNoTLS(),
 	}
 }
+
+// ClientDir holds the client settings (mariadb.Server.WriteClientConfig)
+// that Keel's terminal points MariaDB's commands at.
+func (o Options) ClientDir() string { return filepath.Join(o.home(), "client") }
 
 // home is Keel's folder. Options made without one keep everything in the
 // MariaDB folder, like the lab.

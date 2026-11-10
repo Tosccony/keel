@@ -2,7 +2,8 @@
 # Checks a trimmed MariaDB (dist/mariadb/<os>-<arch>/mariadb) with Keel's
 # own code: set up a data folder, start, check every table, connect over
 # TLS with a password (MariaDB's own client insists on TLS once there's a
-# password), stop cleanly, back up, repair, start and stop again.
+# password), stop cleanly even with that password, back up, repair, start
+# and stop again.
 #
 # Usage: scripts/test-mariadb-runtime.sh dist/mariadb/linux-x86_64/mariadb
 set -euo pipefail
@@ -37,6 +38,11 @@ if ! echo "$cipher" | grep -q '[A-Z]'; then
   echo "test-mariadb-runtime: no TLS cipher; a password login can't work" >&2
   exit 1
 fi
+echo "--- stop with a root password Keel doesn't know"
+out="$(k stop)"
+echo "$out"
+grep -q 'confirms "Shutdown complete"' <<<"$out" || { echo "test-mariadb-runtime: no clean stop with a root password" >&2; exit 1; }
+k start
 sql -ppw -e "ALTER USER IF EXISTS root@localhost IDENTIFIED BY '';
              ALTER USER IF EXISTS root@'127.0.0.1' IDENTIFIED BY '';
              ALTER USER IF EXISTS root@'::1' IDENTIFIED BY ''"

@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/Tosccony/keel/internal/mariadb"
 	"github.com/Tosccony/keel/internal/ports"
 )
 
@@ -106,19 +107,45 @@ func (u *ui) openTerminal() {
 	if u.toolPaths != nil {
 		paths = u.toolPaths()
 	}
-	if err := startTerminal(dir, paths); err != nil {
+	env := u.clientEnv()
+	if err := startTerminal(dir, paths, env); err != nil {
 		u.log(bad, "Couldn't open a terminal: "+err.Error())
 	}
 }
 
-func startTerminal(dir string, paths []string) error {
+// clientEnv writes the client settings that point MariaDB's commands at
+// Keel's MariaDB (its port, its socket, and no TLS on Windows on ARM), and
+// returns the variable that makes them use it. Without it, "mariadb -u
+// root" in the terminal looks for the system's MariaDB instead.
+func (u *ui) clientEnv() []string {
+	if u.clientDir == "" || u.port == 0 {
+		return nil
+	}
+	// A copy with the shown port: the server's own fields are only read
+	// under mu, which a start can hold for a while.
+	c := mariadb.Server{Port: u.port, Socket: u.server.Socket, NoTLS: u.server.NoTLS}
+	if err := c.WriteClientConfig(u.clientDir); err != nil {
+		u.log(warn, "The terminal's mariadb command may not find Keel's MariaDB: "+err.Error())
+		return nil
+	}
+	return []string{"MARIADB_HOME=" + u.clientDir}
+}
+
+// startTerminal opens the system's terminal in dir with paths added to the
+// PATH and env set.
+func startTerminal(dir string, paths, env []string) error {
 	path := strings.Join(append(paths, os.Getenv("PATH")), string(os.PathListSeparator))
 	switch runtime.GOOS {
 	case "darwin":
 		// Terminal opens .command files; this one sets the PATH and folder.
 		script := filepath.Join(os.TempDir(), "keel-terminal.command")
-		body := fmt.Sprintf("#!/bin/sh\nexport PATH=%s\ncd %s || exit 1\nclear\necho \"Keel: mariadb, php and perl are ready in this terminal.\"\nexec \"${SHELL:-/bin/zsh}\" -i\n",
-			shellQuote(path), shellQuote(dir))
+		var exports strings.Builder
+		for _, kv := range append([]string{"PATH=" + path}, env...) {
+			k, v, _ := strings.Cut(kv, "=")
+			fmt.Fprintf(&exports, "export %s=%s\n", k, shellQuote(v))
+		}
+		body := fmt.Sprintf("#!/bin/sh\n%scd %s || exit 1\nclear\necho \"Keel: mariadb, php and perl are ready in this terminal.\"\nexec \"${SHELL:-/bin/zsh}\" -i\n",
+			exports.String(), shellQuote(dir))
 		if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 			return err
 		}
@@ -126,7 +153,7 @@ func startTerminal(dir string, paths []string) error {
 	case "windows":
 		cmd := exec.Command("cmd", "/C", "start", "Keel", "cmd", "/K", "echo Keel: mariadb, php and perl are ready in this window.")
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "PATH="+path)
+		cmd.Env = append(append(os.Environ(), "PATH="+path), env...)
 		return cmd.Start()
 	default:
 		for _, term := range [][]string{
@@ -135,7 +162,7 @@ func startTerminal(dir string, paths []string) error {
 			if p, err := exec.LookPath(term[0]); err == nil {
 				cmd := exec.Command(p)
 				cmd.Dir = dir
-				cmd.Env = append(os.Environ(), "PATH="+path)
+				cmd.Env = append(append(os.Environ(), "PATH="+path), env...)
 				return cmd.Start()
 			}
 		}

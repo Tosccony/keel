@@ -126,7 +126,7 @@ func (s *Server) repairTables(ctx context.Context, rep *RepairReport) error {
 		return fmt.Errorf("mariadb: check tables in repair mode: %w", err)
 	}
 	if len(problems) > 0 {
-		db, err := sql.Open("mysql", s.dsn())
+		db, _, err := s.connect(ctx, s.Port)
 		if err != nil {
 			return err
 		}

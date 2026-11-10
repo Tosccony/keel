@@ -15,11 +15,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -74,12 +74,22 @@ type Server struct {
 	LogFile string // MariaDB's error log
 	PIDFile string // where mariadbd writes its process ID; default DataDir/mariadbd.pid
 
+	// NoTLS starts MariaDB without TLS. Windows on ARM needs it: MariaDB
+	// runs there in Microsoft's x64 emulator, which lacks an instruction
+	// MariaDB's TLS library uses, so with TLS the server aborts at start.
+	// MariaDB's own commands then need the client settings from
+	// WriteClientConfig, or they refuse passworded logins.
+	NoTLS bool
+
 	// JournalFile records how MariaDB last stopped. Default: keel-journal.json
 	// next to the data folder.
 	JournalFile string
 	// BackupDir holds the copies taken before recovery. Default: backups/
 	// next to the data folder.
 	BackupDir string
+	// AccountFile holds the password of Keel's own MariaDB account (see
+	// account.go). Default: keel-account next to the data folder.
+	AccountFile string
 	// LockFile is locked while Keel starts, stops or sets up MariaDB.
 	// Default: keel.lock next to the data folder.
 	LockFile string
@@ -258,7 +268,23 @@ func (s *Server) launch(ctx context.Context, extra ...string) error {
 	}()
 	s.child = c
 
-	return s.waitReady(ctx, logStart)
+	user, err := s.waitReady(ctx, logStart)
+	if err != nil {
+		return err
+	}
+	if user == "root" && !slices.Contains(extra, repairModeArgs[0]) {
+		// No account of Keel's own yet (or its password is lost): add one
+		// while root has no password. Repair mode can't change accounts.
+		db, _, err := s.connect(ctx, s.Port)
+		if err == nil {
+			err = s.ensureAccount(ctx, db)
+			db.Close()
+		}
+		if err != nil {
+			s.progress("Couldn't add Keel's own MariaDB account: " + err.Error())
+		}
+	}
+	return nil
 }
 
 // PID returns the process ID of the server this Server started, or 0.
@@ -303,7 +329,7 @@ func (s *Server) validate() error {
 
 // args builds the same command line as running mariadbd by hand.
 func (s *Server) args() []string {
-	return []string{
+	args := []string{
 		"--no-defaults", // must come first: ignore every my.cnf so only Keel's settings apply
 		"--datadir=" + s.DataDir,
 		"--port=" + strconv.Itoa(s.Port),
@@ -312,6 +338,10 @@ func (s *Server) args() []string {
 		"--log-error=" + s.LogFile,
 		"--pid-file=" + s.pidFile(),
 	}
+	if s.NoTLS {
+		args = append(args, "--skip-ssl")
+	}
+	return args
 }
 
 func (s *Server) pidFile() string {
@@ -321,32 +351,18 @@ func (s *Server) pidFile() string {
 	return filepath.Join(s.DataDir, "mariadbd.pid")
 }
 
-// dsn is the connection string for the root account over TCP.
-func (s *Server) dsn() string { return s.dsnFor(s.Port) }
+// dsn is the connection string for root without a password, for tests.
+// Keel itself logs in with connect, which prefers its own account.
+func (s *Server) dsn() string { return s.dsnAs(s.Port, login{user: "root"}) }
 
-func (s *Server) dsnFor(port int) string {
-	cfg := mysql.NewConfig()
-	cfg.User = "root"
-	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	cfg.Timeout = time.Second
-	cfg.ReadTimeout = 10 * time.Second
-	cfg.WriteTimeout = 10 * time.Second
-	return cfg.FormatDSN()
-}
-
-// waitReady pings the server until it answers, it exits, or the wait ends.
-// A successful ping is the real proof of readiness; the wording of MariaDB's
-// "ready for connections" log line changes between versions.
-func (s *Server) waitReady(ctx context.Context, logStart int64) error {
+// waitReady logs in to the server until it answers, it exits, or the wait
+// ends, and says which user got in. A login is the real proof of
+// readiness; the wording of MariaDB's "ready for connections" log line
+// changes between versions, so the log only counts when MariaDB refuses
+// every login Keel has.
+func (s *Server) waitReady(ctx context.Context, logStart int64) (user string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, orDefault(s.ReadyTimeout, defaultReadyTimeout))
 	defer cancel()
-
-	db, err := sql.Open("mysql", s.dsn())
-	if err != nil {
-		return fmt.Errorf("mariadb: %w", err)
-	}
-	defer db.Close()
 
 	c := s.child
 	tick := time.NewTicker(250 * time.Millisecond)
@@ -355,21 +371,33 @@ func (s *Server) waitReady(ctx context.Context, logStart int64) error {
 		select {
 		case <-c.exited:
 			s.child = nil
-			return fmt.Errorf("mariadb: %w (%v)\n%s", ErrExitedDuringStartup, c.err, s.logTail(logStart, 15))
+			return "", fmt.Errorf("mariadb: %w (%v)\n%s", ErrExitedDuringStartup, c.err, s.logTail(logStart, 15))
 		case <-ctx.Done():
-			return fmt.Errorf("mariadb: stopped waiting for the server to be ready; it is still running as PID %d: %w", s.PID(), ctx.Err())
+			return "", fmt.Errorf("mariadb: stopped waiting for the server to be ready; it is still running as PID %d: %w", s.PID(), ctx.Err())
 		case <-tick.C:
 			pingCtx, cancelPing := context.WithTimeout(ctx, time.Second)
-			err := db.PingContext(pingCtx)
+			db, user, err := s.connect(pingCtx, s.Port)
 			cancelPing()
+			if errors.Is(err, ErrNoLogin) {
+				// It answers but won't let Keel in. If our server says it's
+				// ready, it's ours: it couldn't have started on a port
+				// another server held.
+				if logSaysReady(s.LogFile, logStart) {
+					s.progress(fmt.Sprintf("MariaDB is ready (PID %d), but Keel can't log in to it: root has a password, and Keel's own account is missing.", s.PID()))
+					return "", nil
+				}
+				continue
+			}
 			if err != nil {
 				continue
 			}
-			if err := s.checkDataDir(ctx, db); err != nil {
-				return err
+			err = s.checkDataDir(ctx, db)
+			db.Close()
+			if err != nil {
+				return "", err
 			}
 			s.progress(fmt.Sprintf("MariaDB is ready (PID %d).", s.PID()))
-			return nil
+			return user, nil
 		}
 	}
 }

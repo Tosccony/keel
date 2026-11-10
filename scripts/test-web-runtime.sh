@@ -58,6 +58,8 @@ out="$(k web-start)" || fail "web-start failed: $out"
 echo "$out"
 port="$(echo "$out" | sed -n 's|.*http://localhost:\([0-9]*\)/.*|\1|p' | tail -1)"
 [ -n "$port" ] || fail "no port in: $out"
+https_port="$(echo "$out" | sed -n 's|.*https://localhost:\([0-9]*\)/.*|\1|p' | tail -1)"
+[ -n "$https_port" ] || fail "no HTTPS port in: $out"
 
 page="$(curl -fsS "http://127.0.0.1:$port/check.php")" || fail "check.php didn't load"
 echo "$page"
@@ -65,6 +67,10 @@ echo "$page" | grep -q "^PHP $WANT_PHP\." || fail "not PHP $WANT_PHP"
 if echo "$page" | grep -q MISSING; then fail "PHP is missing extensions"; fi
 echo "$page" | grep -q "upload=64M" || fail "Keel's php.ini wasn't used"
 [ "$(curl -fsS "http://127.0.0.1:$port/shop/p/7")" = "product 7" ] || fail ".htaccess rewrite didn't work"
+# HTTPS with Keel's certificate (self-signed, so -k), served by the same PHP.
+secure="$(curl -fsSk "https://127.0.0.1:$https_port/check.php")" || fail "check.php didn't load over HTTPS"
+grep -q "^PHP $WANT_PHP\." <<<"$secure" || fail "HTTPS didn't serve PHP"
+echo "HTTPS works"
 if [ -n "$PMA" ]; then
   # Read the whole page first: grep -q stops reading at the first match,
   # and with pipefail curl's "Failed writing body" would fail the check.

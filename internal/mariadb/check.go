@@ -20,7 +20,7 @@ type TableProblem struct {
 // views (information_schema, performance_schema, sys). It includes the
 // mysql database, whose Aria tables are the ones that break in XAMPP.
 func (s *Server) CheckTables(ctx context.Context) (checked int, problems []TableProblem, err error) {
-	db, err := sql.Open("mysql", s.dsn())
+	db, _, err := s.connect(ctx, s.Port)
 	if err != nil {
 		return 0, nil, err
 	}

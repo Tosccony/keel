@@ -39,6 +39,10 @@ type ui struct {
 	setUp      bool // the data folder exists; false until the first start creates it
 	port       int  // the port shown; the server's Port is only touched under mu
 
+	// clientDir, if set, is where the terminal's client settings go
+	// (mariadb.Server.WriteClientConfig).
+	clientDir string
+
 	// prepare, if set, runs before each start: it creates the data folder
 	// on the first start and moves MariaDB off a port another program
 	// holds. It returns a note for the log.

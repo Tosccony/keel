@@ -33,8 +33,8 @@ Sizes for 11.8.9, compressed: Windows 16.5 MB (from 104 MB), Linux 34.7 MB (from
 | System | How | Result |
 |---|---|---|
 | Ubuntu 24.04, Debian 12, Fedora 41 | Docker (x86_64), Keel's own code: set up, start, check, stop, back up, repair | All pass. Fedora needs `libxcrypt-compat` |
-| Windows 11 on ARM (Parallels, x64 emulation) | Same | Set up works. The server can't start with TLS: the emulator has no RDSEED instruction, which MariaDB's Windows SSL library uses. Without TLS everything works |
-| Real x64 Windows, Linux and macOS | `.github/workflows/mariadb.yml`, which runs `scripts/test-mariadb-runtime.sh` (including a password login over TLS) | Not run yet |
+| Windows 11 on ARM (Parallels, x64 emulation) | Same | The server can't start with TLS ("Failed to setup SSL"): the emulator lacks an instruction MariaDB's Windows SSL library uses. Keel detects Windows on ARM and starts MariaDB without TLS; everything else works |
+| Real x64 Windows, Linux and macOS | `.github/workflows/mariadb.yml`, which runs `scripts/test-mariadb-runtime.sh` (including a password login over TLS, and a stop with that password) | All pass |
 
 ## Why TLS matters
 
@@ -42,8 +42,26 @@ MariaDB 11.4 and later make their own TLS certificate at start, and
 MariaDB's command-line client insists on TLS once root has a password:
 against a server without TLS it refuses with "SSL is required, but the
 server does not support it". So turning TLS off would break students who
-set a root password, and Keel keeps it on. Windows on ARM (Surface,
-Snapdragon laptops) still needs a decision once the x64 results are in.
+set a root password, and Keel keeps it on.
+
+Windows on ARM (Surface, Snapdragon laptops) is the exception: MariaDB
+can't start with TLS there, so Keel starts it with `--skip-ssl`. Keel's
+terminal points MariaDB's commands at a client settings file Keel writes
+(`client/my.cnf` in Keel's folder, through `MARIADB_HOME`) that says
+`skip-ssl`, so password logins work there too. The same file gives them
+Keel's port, and on macOS and Linux its socket.
+
+## Keel's own account
+
+Keel logs in to MariaDB to confirm a start, to ask it to shut down, and to
+check the tables after a crash. Courses often have students give root a
+password, which would lock Keel out. So on the first start Keel adds its
+own account, `keel@127.0.0.1`, with a random password kept in
+`keel-account` next to the data folder (readable only by the user), and
+logs in with that. It's remade if the password file goes missing while
+root has no password. Without any login, Keel still confirms a start from
+MariaDB's log, and stops it with SIGTERM (macOS, Linux) or MariaDB's
+`MySQLShutdown<PID>` event (Windows), which need no account.
 
 ## Licence
 

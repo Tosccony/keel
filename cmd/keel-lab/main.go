@@ -288,6 +288,9 @@ func webCommand(ctx context.Context, opts setup.Options, cmd string) {
 		}
 		apache, php := w.Versions()
 		fmt.Printf("Web server running at http://localhost:%d/ (Apache %s, PHP %s)\n", w.Port, apache, php)
+		if w.HTTPSPort != 0 {
+			fmt.Printf("HTTPS at https://localhost:%d/\n", w.HTTPSPort)
+		}
 	case "web-stop":
 		if err := w.Stop(ctx); err != nil {
 			fail(err)

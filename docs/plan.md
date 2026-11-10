@@ -40,9 +40,9 @@ offers, and must do each part more safely and more simply.
 1. ✅ **Several parts in one window**, settings, the first-run question about the websites folder.
 2. ✅ **Mail catcher** and **FTP server**.
 3. ✅ **Apache and PHP**, then **phpMyAdmin**.
-4. **Bundled runtimes and installers.** ✅ MariaDB, Apache, PHP and phpMyAdmin are built and tested for all three systems in CI (`mariadb.yml`, `web.yml`). Next: publish them and put them into the installers, with the Visual C++ runtime on Windows.
+4. **Bundled runtimes and installers.** ✅ MariaDB, Apache, PHP and phpMyAdmin are built and tested for all three systems in CI (`mariadb.yml`, `web.yml`). ✅ The installers include them (`scripts/fetch-runtimes.sh`), with the Visual C++ runtime on Windows. Next: publish the runtime builds as releases, then tag Keel's first release.
 5. ✅ **Perl** and **Tomcat**, downloaded when first turned on.
 6. **Control-panel extras.** ✅ Ports view, Terminal, logs in each menu, autostart, the tray icon, opening at sign-in, Settings. ✅ A system shutdown or sign-out now counts as a clean stop when MariaDB's own log confirms it, which covers most of what the background service was for.
-7. **Loose ends**: TLS on Windows on ARM; stopping MariaDB on Windows after a student sets a root password; HTTPS for the web server.
+7. **Loose ends.** ✅ Windows on ARM (MariaDB runs without TLS there). ✅ A root password set by the student no longer gets in Keel's way: Keel logs in with its own account, and stops MariaDB through its shutdown event on Windows if even that fails. ✅ The `mariadb` command in Keel's terminal reaches Keel's MariaDB. ✅ HTTPS on port 8443 with a certificate Keel makes for this computer (browsers warn once, as with XAMPP's). Still to do: running `mariadb-upgrade` after a MariaDB version change.
 
 Each step ships with tests and is committed on its own.
