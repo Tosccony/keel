@@ -211,3 +211,39 @@ func TestFTPPart(t *testing.T) {
 		t.Error("still running after Stop")
 	}
 }
+
+// Tomcat from its card: downloaded on the first start (13 MB; Java comes
+// from this computer), then serving its welcome page. Set
+// KEEL_TEST_DOWNLOADS=1 to run it.
+func TestTomcatPart(t *testing.T) {
+	if os.Getenv("KEEL_TEST_DOWNLOADS") == "" {
+		t.Skip("set KEEL_TEST_DOWNLOADS=1 to download Tomcat")
+	}
+	home := t.TempDir()
+	opts := setup.Options{Home: home}
+	if opts.Java() == "" {
+		t.Skip("needs Java 11 or later on this computer")
+	}
+	opts.Settings().SetPort(setup.PartTomcat, freeTCPPort(t))
+	svc := newTomcatService(opts)
+	p, _ := newTestPart(t, svc)
+	if !strings.Contains(p.card.detail.Text, "Not installed") {
+		t.Errorf("before the first start: %q", p.card.detail.Text)
+	}
+	p.finishStart(p.runStart())
+	t.Cleanup(func() { svc.Stop(context.Background()) })
+	if !p.running {
+		t.Fatalf("Tomcat didn't start: %q", p.logLines())
+	}
+	if countContaining(p.logLines(), "Downloading Tomcat") == 0 || countContaining(p.logLines(), "is installed") == 0 {
+		t.Errorf("the download should be reported: %q", p.logLines())
+	}
+	code, body := httpGet(t, "http://127.0.0.1:"+strconv.Itoa(svc.server.Port)+"/")
+	if code != 200 || !strings.Contains(body, "Tomcat is running") || !strings.Contains(body, "Apache Tomcat/10.1") {
+		t.Errorf("welcome page: %d\n%.400s", code, body)
+	}
+	p.finishStop(p.runStop())
+	if p.running || svc.Running() {
+		t.Error("still running after Stop")
+	}
+}

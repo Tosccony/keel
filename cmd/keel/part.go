@@ -44,6 +44,9 @@ type part struct {
 func newPart(w *window, svc service, settings *setup.Settings) *part {
 	p := &part{window: w, svc: svc, settings: settings}
 	p.card = newServiceCard(svc.Name(), svc.Icon(), p.onAction, p.open, p.showMenu)
+	if pr, ok := svc.(progressReporter); ok {
+		pr.SetProgress(func(msg string) { fyne.Do(func() { p.log(info, msg) }) })
+	}
 	p.show()
 	return p
 }

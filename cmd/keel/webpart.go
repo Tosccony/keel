@@ -151,6 +151,15 @@ func openFile(path string) {
 	}
 }
 
+// openFolder opens a folder in Finder, Explorer or the file manager,
+// creating it first if needed.
+func openFolder(dir string) {
+	os.MkdirAll(dir, 0o755)
+	if link, err := url.Parse(storage.NewFileURI(dir).String()); err == nil {
+		fyne.CurrentApp().OpenURL(link)
+	}
+}
+
 func joinNotes(a, b string) string {
 	switch {
 	case a == "":

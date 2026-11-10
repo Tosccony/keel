@@ -75,6 +75,8 @@ case "$OS-$ARCH" in
   linux-x86_64) SSL_TARGET=linux-x86_64 ;;
   linux-arm64) SSL_TARGET=linux-aarch64 ;;
 esac
+# Arrays below may be empty: "${A[@]+"${A[@]}"}" expands them safely under
+# set -u in macOS's bash 3.2, which GitHub's Mac runners use.
 if [ -z "${ZLIB+set}" ]; then ZLIB=(); fi
 HOST_FLAGS=()
 if [ "$OS" = macos ] && [ "$ARCH" != "$(uname -m)" ]; then
@@ -90,26 +92,26 @@ unpack "openssl-$OPENSSL_VERSION.tar.gz"
 echo "== PCRE2 $PCRE2_VERSION"
 unpack "pcre2-$PCRE2_VERSION.tar.bz2"
 (cd "$WORK/pcre2-$PCRE2_VERSION" &&
-  ./configure "${HOST_FLAGS[@]}" --prefix="$DEPS" --disable-shared --enable-static >/dev/null &&
+  ./configure ${HOST_FLAGS[@]+"${HOST_FLAGS[@]}"} --prefix="$DEPS" --disable-shared --enable-static >/dev/null &&
   make -j"$JOBS" >/dev/null && make install >/dev/null)
 
 echo "== expat $EXPAT_VERSION"
 unpack "expat-$EXPAT_VERSION.tar.xz"
 (cd "$WORK/expat-$EXPAT_VERSION" &&
-  ./configure "${HOST_FLAGS[@]}" --prefix="$DEPS" --disable-shared --enable-static \
+  ./configure ${HOST_FLAGS[@]+"${HOST_FLAGS[@]}"} --prefix="$DEPS" --disable-shared --enable-static \
     --without-docbook --without-examples --without-tests >/dev/null &&
   make -j"$JOBS" >/dev/null && make install >/dev/null)
 
 echo "== APR $APR_VERSION"
 unpack "apr-$APR_VERSION.tar.bz2"
 (cd "$WORK/apr-$APR_VERSION" &&
-  ./configure "${HOST_FLAGS[@]}" --prefix="$DEPS" --disable-shared --enable-static >/dev/null &&
+  ./configure ${HOST_FLAGS[@]+"${HOST_FLAGS[@]}"} --prefix="$DEPS" --disable-shared --enable-static >/dev/null &&
   make -j"$JOBS" >/dev/null && make install >/dev/null)
 
 echo "== APR-util $APRUTIL_VERSION"
 unpack "apr-util-$APRUTIL_VERSION.tar.bz2"
 (cd "$WORK/apr-util-$APRUTIL_VERSION" &&
-  ./configure "${HOST_FLAGS[@]}" --prefix="$DEPS" --with-apr="$DEPS" --with-expat="$DEPS" \
+  ./configure ${HOST_FLAGS[@]+"${HOST_FLAGS[@]}"} --prefix="$DEPS" --with-apr="$DEPS" --with-expat="$DEPS" \
     --without-crypto --without-ldap --without-pgsql \
     --without-mysql --without-sqlite3 --without-sqlite2 --without-oracle --without-odbc \
     --without-berkeley-db --without-gdbm --without-ndbm >/dev/null &&
@@ -124,9 +126,9 @@ MODULES="authz_core authz_host authz_user authn_core authn_file auth_basic acces
   unixd dir mime log_config alias rewrite headers setenvif env filter deflate expires
   proxy proxy_fcgi autoindex include negotiation version cgid ssl socache_shmcb"
 (cd "$WORK/httpd-$HTTPD_VERSION" &&
-  ./configure "${HOST_FLAGS[@]}" --prefix="$WORK/install" \
+  ./configure ${HOST_FLAGS[@]+"${HOST_FLAGS[@]}"} --prefix="$WORK/install" \
     --with-apr="$DEPS" --with-apr-util="$DEPS" --with-pcre="$DEPS/bin/pcre2-config" \
-    --with-ssl="$DEPS" "${ZLIB[@]}" --with-mpm=event --enable-mods-static="$(echo $MODULES)" \
+    --with-ssl="$DEPS" ${ZLIB[@]+"${ZLIB[@]}"} --with-mpm=event --enable-mods-static="$(echo $MODULES)" \
     --enable-modules=none \
     --disable-proxy-balancer --disable-proxy-ajp --disable-proxy-express \
     --disable-proxy-ftp --disable-proxy-scgi --disable-proxy-uwsgi \

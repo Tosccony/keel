@@ -49,7 +49,8 @@ func main() {
 	u.parts = append(u.parts,
 		u.web,
 		newPart(u.window, newMailService(opts), settings),
-		newPart(u.window, newFTPService(opts), settings))
+		newPart(u.window, newFTPService(opts), settings),
+		newPart(u.window, newTomcatService(opts), settings))
 	w.SetContent(u.content())
 	w.Resize(fyne.NewSize(820, 720))
 
