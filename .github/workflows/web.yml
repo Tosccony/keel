@@ -1,0 +1,154 @@
+# Prepares the Apache, PHP and phpMyAdmin that Keel ships
+# (packaging/web/web.env, packaging/phpmyadmin/phpmyadmin.env) and tests
+# them on each system with Keel's own code (scripts/test-web-runtime.sh).
+# - Windows: Apache Lounge's Apache and php.net's PHP, trimmed.
+# - macOS and Linux: Apache built from source (scripts/build-apache.sh) and
+#   PHP built with static-php-cli (scripts/build-php.sh); macOS for Apple
+#   Silicon and Intel, joined into universal builds.
+#
+# Run it by hand (Actions tab > Web > Run workflow) when a version changes.
+# With "publish" ticked, it attaches the builds to a pre-release named
+# web-<apache>-php<php>, which the Release workflow downloads.
+name: Web
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the builds as a release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install the Visual C++ runtime (as the installer does)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://aka.ms/vc14/vc_redist.x64.exe -OutFile vc_redist.x64.exe
+          Start-Process .\vc_redist.x64.exe -ArgumentList "/install","/quiet","/norestart" -Wait
+      - run: scripts/fetch-web-windows.sh
+      - run: scripts/fetch-phpmyadmin.sh
+      - run: scripts/test-web-runtime.sh dist/apache/windows-x86_64/apache dist/php/windows-x86_64/php dist/phpmyadmin
+      - run: |
+          tar -czf apache-windows-x86_64.tar.gz -C dist/apache/windows-x86_64 apache
+          tar -czf php-windows-x86_64.tar.gz -C dist/php/windows-x86_64 php
+      - uses: actions/upload-artifact@v6
+        with:
+          name: web-windows-x86_64
+          path: "*-windows-x86_64.tar.gz"
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+      - run: scripts/build-apache.sh
+      - run: scripts/build-php.sh
+      - run: scripts/fetch-phpmyadmin.sh
+      - run: scripts/test-web-runtime.sh dist/apache/linux-x86_64/apache dist/php/linux-x86_64/php dist/phpmyadmin
+      - run: |
+          tar -czf apache-linux-x86_64.tar.gz -C dist/apache/linux-x86_64 apache
+          tar -czf php-linux-x86_64.tar.gz -C dist/php/linux-x86_64 php
+      - uses: actions/upload-artifact@v6
+        with:
+          name: web-linux-x86_64
+          path: "*-linux-x86_64.tar.gz"
+          if-no-files-found: error
+
+  macos-build:
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - run: scripts/build-apache.sh ${{ matrix.arch }}
+      - run: scripts/build-php.sh ${{ matrix.arch }}
+      - run: |
+          tar -czf apache-macos-${{ matrix.arch }}.tar.gz -C dist/apache/macos-${{ matrix.arch }} apache
+          tar -czf php-macos-${{ matrix.arch }}.tar.gz -C dist/php/macos-${{ matrix.arch }} php
+      - uses: actions/upload-artifact@v6
+        with:
+          name: web-macos-${{ matrix.arch }}
+          path: "*-macos-${{ matrix.arch }}.tar.gz"
+          if-no-files-found: error
+
+  macos:
+    needs: macos-build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: web-macos-*
+          merge-multiple: true
+      - name: Join into universal builds
+        run: |
+          for part in apache php; do
+            for arch in arm64 x86_64; do
+              mkdir -p "dist/$part/macos-$arch"
+              tar -xzf "$part-macos-$arch.tar.gz" -C "dist/$part/macos-$arch"
+            done
+            scripts/merge-macos.sh "dist/$part/macos-arm64/$part" "dist/$part/macos-x86_64/$part" "dist/$part/macos-universal/$part"
+          done
+      - run: scripts/fetch-phpmyadmin.sh
+      - run: scripts/test-web-runtime.sh dist/apache/macos-universal/apache dist/php/macos-universal/php dist/phpmyadmin
+      - run: |
+          tar -czf apache-macos-universal.tar.gz -C dist/apache/macos-universal apache
+          tar -czf php-macos-universal.tar.gz -C dist/php/macos-universal php
+      - uses: actions/upload-artifact@v6
+        with:
+          name: web-macos-universal
+          path: "*-macos-universal.tar.gz"
+          if-no-files-found: error
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: web-*
+          merge-multiple: true
+      - run: scripts/fetch-phpmyadmin.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source packaging/web/web.env
+          source packaging/phpmyadmin/phpmyadmin.env
+          tag="web-$HTTPD_VERSION-php$PHP_VERSION"
+          for p in windows-x86_64 linux-x86_64 macos-universal; do
+            mv "apache-$p.tar.gz" "apache-$HTTPD_VERSION-$p.tar.gz"
+            mv "php-$p.tar.gz" "php-$PHP_VERSION-$p.tar.gz"
+          done
+          tar -czf "phpmyadmin-$PHPMYADMIN_VERSION.tar.gz" -C dist phpmyadmin
+          sha256sum apache-*.tar.gz php-*.tar.gz phpmyadmin-*.tar.gz > SHA256SUMS.txt
+          gh release create "$tag" apache-*.tar.gz php-*.tar.gz phpmyadmin-*.tar.gz SHA256SUMS.txt \
+            --title "Apache $HTTPD_VERSION, PHP $PHP_VERSION and phpMyAdmin $PHPMYADMIN_VERSION for Keel" --prerelease \
+            --notes "The web server Keel ships. Windows: Apache Lounge's Apache and php.net's PHP, trimmed. macOS and Linux: Apache built from source with scripts/build-apache.sh, and PHP built from source with static-php-cli (scripts/build-php.sh). phpMyAdmin $PHPMYADMIN_VERSION, prepared with scripts/fetch-phpmyadmin.sh."

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Joins the Apple Silicon and Intel MariaDB builds into one universal build,
+# Joins Apple Silicon and Intel builds (MariaDB, Apache, PHP) into one universal build,
 # like Keel's own universal binary, and signs every program and plugin
 # (ad hoc; Apple Silicon refuses to run unsigned code).
 #
-# Usage: scripts/merge-mariadb-macos.sh ARM64_DIR X86_64_DIR OUT_DIR
+# Usage: scripts/merge-macos.sh ARM64_DIR X86_64_DIR OUT_DIR
 set -euo pipefail
 
 ARM="$1"
@@ -20,4 +20,7 @@ mkdir -p "$OUT"
     cp -p "$ARM/$f" "$OUT/$f"
   fi
 done
-lipo -info "$OUT/bin/mariadbd"
+# Show what was joined.
+find "$OUT" -type f | while read -r f; do
+  if file "$f" | grep -q "Mach-O"; then lipo -info "$f"; fi
+done

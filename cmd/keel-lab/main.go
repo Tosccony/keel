@@ -11,6 +11,10 @@
 //	go run ./cmd/keel-lab backup   # save a copy of the data folder (stopped only)
 //	go run ./cmd/keel-lab backups  # list the copies
 //	go run ./cmd/keel-lab restore NAME  # put a copy back (stopped only)
+//	go run ./cmd/keel-lab sites DIR     # set the websites folder (XAMPP's htdocs)
+//	go run ./cmd/keel-lab web-start     # start Apache with PHP
+//	go run ./cmd/keel-lab web-status    # is it running, and where
+//	go run ./cmd/keel-lab web-stop      # stop it
 //
 // The server keeps running after keel-lab exits, the same way it keeps
 // running after Keel's window closes.
@@ -35,7 +39,7 @@ func main() {
 	opts := setup.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] init|start|status|check|stop|repair|backup|backups|restore NAME")
+		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] init|start|status|check|stop|repair|backup|backups|restore NAME|sites DIR|web-start|web-status|web-stop")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -87,6 +91,20 @@ func main() {
 		listBackups(s)
 	case "restore":
 		restore(s, flag.Arg(1))
+	case "sites":
+		dir, err := filepath.Abs(flag.Arg(1))
+		if err != nil || flag.Arg(1) == "" {
+			fail(fmt.Errorf("usage: keel-lab sites DIR"))
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fail(err)
+		}
+		if err := opts.Settings().SetSites(dir); err != nil {
+			fail(err)
+		}
+		fmt.Println("Websites folder:", dir)
+	case "web-start", "web-stop", "web-status":
+		webCommand(ctx, opts, flag.Arg(0))
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -230,4 +248,37 @@ func ask(question string) bool {
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "error:", err)
 	os.Exit(1)
+}
+
+func webCommand(ctx context.Context, opts setup.Options, cmd string) {
+	w, err := opts.Web()
+	if err != nil {
+		fail(err)
+	}
+	switch cmd {
+	case "web-start":
+		note, err := opts.PrepareWeb(ctx, w, "")
+		if note != "" {
+			fmt.Println(note)
+		}
+		if err != nil {
+			fail(err)
+		}
+		if err := w.Start(ctx); err != nil {
+			fail(err)
+		}
+		apache, php := w.Versions()
+		fmt.Printf("Web server running at http://localhost:%d/ (Apache %s, PHP %s)\n", w.Port, apache, php)
+	case "web-stop":
+		if err := w.Stop(ctx); err != nil {
+			fail(err)
+		}
+		fmt.Println("Web server stopped.")
+	case "web-status":
+		if w.Running() {
+			fmt.Printf("Web server running at http://localhost:%d/\n", w.Port)
+		} else {
+			fmt.Println("Web server not running.")
+		}
+	}
 }

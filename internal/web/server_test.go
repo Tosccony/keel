@@ -43,6 +43,12 @@ func labRuntime(t *testing.T) Runtime {
 			rt.PHP = filepath.Join(filepath.Dir(filepath.Dir(p)), "bin", "php")
 		}
 	}
+	// KEEL_TEST_APACHE=dist/apache/macos-arm64/apache tests a Keel-built
+	// Apache instead, with its modules compiled in.
+	if dir := os.Getenv("KEEL_TEST_APACHE"); dir != "" {
+		abs, _ := filepath.Abs(filepath.Join("..", "..", dir))
+		rt.Httpd, rt.ModulesDir, rt.MimeTypes = filepath.Join(abs, "bin", "httpd"), "", filepath.Join(abs, "conf", "mime.types")
+	}
 	if _, err := os.Stat(rt.Httpd); err != nil || rt.PHPFPM == "" {
 		t.Skip("needs /usr/sbin/httpd and Homebrew's php-fpm")
 	}

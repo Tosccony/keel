@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -31,16 +30,9 @@ type webService struct {
 
 func newWebService(opts setup.Options) *webService {
 	w := &webService{opts: opts, settings: opts.Settings()}
-	rt, err := opts.WebRuntime()
-	if err != nil {
-		w.err = err
+	w.server, w.err = opts.Web()
+	if w.err != nil {
 		return w
-	}
-	w.server = &web.Server{
-		Runtime: rt,
-		Folder:  opts.WebFolder(),
-		Port:    w.settings.Port(setup.PartWeb, setup.DefaultPorts[setup.PartWeb]),
-		FPMPort: w.settings.Port(setup.PartPHP, setup.DefaultPorts[setup.PartPHP]),
 	}
 	go func() {
 		apache, php := w.server.Versions()
@@ -84,37 +76,12 @@ func (w *webService) Start(ctx context.Context) (string, error) {
 	if w.server == nil {
 		return "", w.err
 	}
-	sites := w.settings.Sites()
-	if sites == "" {
-		return "", errors.New("choose a websites folder first")
-	}
-	var notes string
-	port, note, err := w.opts.MovePort(ctx, setup.PartWeb, "the web server", w.server.Port)
-	if err != nil {
-		return "", err
-	}
-	notes += note
-	fpm := w.server.FPMPort
-	if w.server.PHPFPM != "" {
-		if fpm, note, err = w.opts.MovePort(ctx, setup.PartPHP, "PHP", fpm); err != nil {
-			return notes, err
-		}
-		notes = joinNotes(notes, note)
-	}
 	mailPort := w.settings.Port(setup.PartMail, setup.DefaultPorts[setup.PartMail])
-	mailWeb := w.settings.Port(setup.PartMailWeb, setup.DefaultPorts[setup.PartMailWeb])
-	s := w.server
-	s.Sites, s.Port, s.FPMPort = sites, port, fpm
-	s.MariaDBPort = w.opts.MariaDBPort()
-	s.MariaDBSocket = w.opts.Server().Socket
-	s.MailPort, s.MailInbox = mailPort, fmt.Sprintf("http://localhost:%d/", mailWeb)
-	s.Sendmail = sendmailCommand(mailPort)
-	s.Timezone = setup.Timezone()
-	s.PHPMyAdmin = w.opts.PHPMyAdmin()
-	if wrote, err := web.WriteWelcome(sites); err == nil && wrote {
-		notes = joinNotes(notes, "The websites folder was empty, so Keel put a welcome page in it (index.php).")
+	note, err := w.opts.PrepareWeb(ctx, w.server, sendmailCommand(mailPort))
+	if err != nil {
+		return note, err
 	}
-	return notes, s.Start(ctx)
+	return note, w.server.Start(ctx)
 }
 
 func (w *webService) Stop(ctx context.Context) error {

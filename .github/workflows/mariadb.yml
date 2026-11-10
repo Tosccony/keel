@@ -97,7 +97,7 @@ jobs:
             mkdir -p "dist/mariadb/macos-$arch"
             tar -xzf "mariadb-macos-$arch.tar.gz" -C "dist/mariadb/macos-$arch"
           done
-          scripts/merge-mariadb-macos.sh dist/mariadb/macos-arm64/mariadb \
+          scripts/merge-macos.sh dist/mariadb/macos-arm64/mariadb \
             dist/mariadb/macos-x86_64/mariadb dist/mariadb/macos-universal/mariadb
       - run: scripts/test-mariadb-runtime.sh dist/mariadb/macos-universal/mariadb
       - run: tar -czf mariadb-macos-universal.tar.gz -C dist/mariadb/macos-universal mariadb

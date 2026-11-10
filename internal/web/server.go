@@ -85,6 +85,11 @@ func (s *Server) processes() {
 			PIDFile: filepath.Join(s.run(), "httpd.pid"),
 			Marker:  filepath.ToSlash(conf),
 		}
+		if s.PHPModule != "" {
+			// PHP's extensions need the DLLs in PHP's folder (ICU for intl,
+			// OpenSSL, libsodium), which Windows looks for on the PATH.
+			s.httpd.Env = []string{"PATH=" + filepath.Dir(s.PHPModule) + string(os.PathListSeparator) + os.Getenv("PATH")}
+		}
 	}
 	if s.fpm == nil && s.PHPFPM != "" {
 		conf := filepath.Join(s.conf(), "php-fpm.conf")

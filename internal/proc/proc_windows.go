@@ -1,8 +1,10 @@
 package proc
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"syscall"
 )
 
@@ -18,10 +20,17 @@ func detach(cmd *exec.Cmd) {
 // data; MariaDB never comes through here.
 func ask(pid int) error { return force(pid) }
 
+// force ends the process and its children: Apache on Windows is a parent
+// and a worker, and killing only the parent can leave the worker holding
+// the port.
 func force(pid int) error {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return err
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if p, ferr := os.FindProcess(pid); ferr == nil && p.Kill() == nil {
+			return nil
+		}
+		return fmt.Errorf("taskkill: %v: %s", err, out)
 	}
-	return p.Kill()
+	return nil
 }

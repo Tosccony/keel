@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/template"
 )
@@ -27,6 +28,17 @@ var unixModules = []string{
 	"include", "negotiation", "version", "cgid",
 }
 
+// windowsModules are the same modules for Apache Lounge's Windows build,
+// which loads them from files: no unixd or MPM (Windows' is built in), and
+// mod_cgi in place of mod_cgid.
+var windowsModules = []string{
+	"authz_core", "authz_host", "authz_user", "authn_core", "authn_file",
+	"auth_basic", "access_compat", "dir", "mime", "log_config", "alias",
+	"rewrite", "headers", "setenvif", "env", "filter", "deflate", "expires",
+	"proxy", "proxy_fcgi", "proxy_http", "autoindex", "include",
+	"negotiation", "version", "cgi",
+}
+
 var httpdConf = template.Must(template.New("httpd.conf").Parse(`# Written by Keel each time the web server starts: changes here are lost.
 # Put your own Apache settings in custom.conf, next to this file.
 
@@ -36,6 +48,11 @@ PidFile "{{.Run}}/httpd.pid"
 Listen 127.0.0.1:{{.Port}}
 ServerName localhost:{{.Port}}
 {{range .Modules}}LoadModule {{.}}_module "{{$.ModulesDir}}/mod_{{.}}.so"
+{{end}}
+{{if .Windows}}# Some antivirus software breaks Windows' accept optimisations.
+AcceptFilter http none
+AcceptFilter https none
+EnableSendfile off
 {{end}}
 ErrorLog "{{.Logs}}/apache-error.log"
 LogLevel warn
@@ -142,6 +159,7 @@ opcache.enable = 1
 opcache.revalidate_freq = 0
 {{if .ExtensionDir}}
 extension_dir = "{{.ExtensionDir}}"
+zend_extension = opcache
 {{range .Extensions}}extension = {{.}}
 {{end}}{{end}}`))
 
@@ -315,8 +333,12 @@ func (s *Server) vars() map[string]any {
 		"PHPMyAdmin": slash(s.PHPMyAdmin), "ExtensionDir": slash(s.ExtensionDir),
 		"Token": s.token,
 	}
+	v["Windows"] = runtime.GOOS == "windows"
 	if s.ModulesDir != "" {
 		v["Modules"] = unixModules
+		if runtime.GOOS == "windows" {
+			v["Modules"] = windowsModules
+		}
 	}
 	if s.PHPModule != "" && s.ExtensionDir != "" {
 		v["Extensions"] = windowsExtensions
