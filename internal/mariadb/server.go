@@ -268,13 +268,16 @@ func (s *Server) launch(ctx context.Context, extra ...string) error {
 	}()
 	s.child = c
 
-	user, err := s.waitReady(ctx, logStart)
+	l, err := s.waitReady(ctx, logStart)
 	if err != nil {
 		return err
 	}
-	if user == "root" && !slices.Contains(extra, repairModeArgs[0]) {
+	if l.user == "" || slices.Contains(extra, repairModeArgs[0]) {
+		return nil // no login, or repair mode, which can't change accounts
+	}
+	if l.user == "root" {
 		// No account of Keel's own yet (or its password is lost): add one
-		// while root has no password. Repair mode can't change accounts.
+		// while root has no password.
 		db, _, err := s.connect(ctx, s.Port)
 		if err == nil {
 			err = s.ensureAccount(ctx, db)
@@ -284,6 +287,7 @@ func (s *Server) launch(ctx context.Context, extra ...string) error {
 			s.progress("Couldn't add Keel's own MariaDB account: " + err.Error())
 		}
 	}
+	s.upgradeIfNeeded(ctx)
 	return nil
 }
 
@@ -360,7 +364,7 @@ func (s *Server) dsn() string { return s.dsnAs(s.Port, login{user: "root"}) }
 // readiness; the wording of MariaDB's "ready for connections" log line
 // changes between versions, so the log only counts when MariaDB refuses
 // every login Keel has.
-func (s *Server) waitReady(ctx context.Context, logStart int64) (user string, err error) {
+func (s *Server) waitReady(ctx context.Context, logStart int64) (l login, err error) {
 	ctx, cancel := context.WithTimeout(ctx, orDefault(s.ReadyTimeout, defaultReadyTimeout))
 	defer cancel()
 
@@ -371,12 +375,12 @@ func (s *Server) waitReady(ctx context.Context, logStart int64) (user string, er
 		select {
 		case <-c.exited:
 			s.child = nil
-			return "", fmt.Errorf("mariadb: %w (%v)\n%s", ErrExitedDuringStartup, c.err, s.logTail(logStart, 15))
+			return login{}, fmt.Errorf("mariadb: %w (%v)\n%s", ErrExitedDuringStartup, c.err, s.logTail(logStart, 15))
 		case <-ctx.Done():
-			return "", fmt.Errorf("mariadb: stopped waiting for the server to be ready; it is still running as PID %d: %w", s.PID(), ctx.Err())
+			return login{}, fmt.Errorf("mariadb: stopped waiting for the server to be ready; it is still running as PID %d: %w", s.PID(), ctx.Err())
 		case <-tick.C:
 			pingCtx, cancelPing := context.WithTimeout(ctx, time.Second)
-			db, user, err := s.connect(pingCtx, s.Port)
+			db, l, err := s.connect(pingCtx, s.Port)
 			cancelPing()
 			if errors.Is(err, ErrNoLogin) {
 				// It answers but won't let Keel in. If our server says it's
@@ -384,7 +388,7 @@ func (s *Server) waitReady(ctx context.Context, logStart int64) (user string, er
 				// another server held.
 				if logSaysReady(s.LogFile, logStart) {
 					s.progress(fmt.Sprintf("MariaDB is ready (PID %d), but Keel can't log in to it: root has a password, and Keel's own account is missing.", s.PID()))
-					return "", nil
+					return login{}, nil
 				}
 				continue
 			}
@@ -394,10 +398,10 @@ func (s *Server) waitReady(ctx context.Context, logStart int64) (user string, er
 			err = s.checkDataDir(ctx, db)
 			db.Close()
 			if err != nil {
-				return "", err
+				return login{}, err
 			}
 			s.progress(fmt.Sprintf("MariaDB is ready (PID %d).", s.PID()))
-			return user, nil
+			return l, nil
 		}
 	}
 }

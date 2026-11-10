@@ -35,12 +35,12 @@ func setRootPassword(t *testing.T, s *Server, password string) {
 // loggedInAs is the user Keel logs in as now.
 func loggedInAs(t *testing.T, s *Server) string {
 	t.Helper()
-	db, user, err := s.connect(context.Background(), s.Port)
+	db, l, err := s.connect(context.Background(), s.Port)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	db.Close()
-	return user
+	return l.user
 }
 
 // With Keel's own account, a root password changes nothing: Stop works on

@@ -68,26 +68,26 @@ func (s *Server) dsnAs(port int, l login) string {
 }
 
 // connect opens a connection pool to the server on port with the first
-// login it accepts, and says which user that was. If the server answers
+// login it accepts, and says which login that was. If the server answers
 // but refuses them all, the error wraps ErrNoLogin.
-func (s *Server) connect(ctx context.Context, port int) (*sql.DB, string, error) {
+func (s *Server) connect(ctx context.Context, port int) (*sql.DB, login, error) {
 	var refused error
 	for _, l := range s.logins() {
 		db, err := sql.Open("mysql", s.dsnAs(port, l))
 		if err != nil {
-			return nil, "", fmt.Errorf("mariadb: %w", err)
+			return nil, login{}, fmt.Errorf("mariadb: %w", err)
 		}
 		err = db.PingContext(ctx)
 		if err == nil {
-			return db, l.user, nil
+			return db, l, nil
 		}
 		db.Close()
 		if !accessDenied(err) {
-			return nil, "", err
+			return nil, login{}, err
 		}
 		refused = err
 	}
-	return nil, "", fmt.Errorf("mariadb: %w: %v", ErrNoLogin, refused)
+	return nil, login{}, fmt.Errorf("mariadb: %w: %v", ErrNoLogin, refused)
 }
 
 // accessDenied reports whether err is MariaDB refusing a login.
