@@ -15,6 +15,15 @@ CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath \
   -ldflags "-s -w -X main.version=$VERSION" \
   -o "$DIST/linux/keel" "$ROOT/cmd/keel"
 
+# The runtimes Keel ships (scripts/fetch-runtimes.sh linux-x86_64 ...).
+RUNTIMES="$DIST/runtimes/linux-x86_64"
+for part in mariadb apache php phpmyadmin; do
+  if [ ! -d "$RUNTIMES/$part" ]; then
+    echo "package-linux: $RUNTIMES/$part is missing; run scripts/fetch-runtimes.sh linux-x86_64 $RUNTIMES" >&2
+    exit 1
+  fi
+done
+
 export VERSION
 cd "$ROOT"
 nfpm package --config packaging/linux/nfpm.yaml --packager deb --target "$DIST/keel_amd64.deb"
@@ -23,6 +32,7 @@ nfpm package --config packaging/linux/nfpm.yaml --packager rpm --target "$DIST/k
 # Plain archive for distros without apt, dnf or zypper.
 tar -czf "$DIST/keel_linux_x86_64.tar.gz" \
   -C "$DIST/linux" keel \
-  -C "$ROOT/packaging/linux" keel.desktop keel.png
+  -C "$ROOT/packaging/linux" keel.desktop keel.png \
+  -C "$RUNTIMES" mariadb apache php phpmyadmin
 
 echo "Built $DIST/keel_amd64.deb, keel_x86_64.rpm, keel_linux_x86_64.tar.gz"

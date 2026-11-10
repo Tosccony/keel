@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,14 +18,22 @@ import (
 	"time"
 )
 
+// freePort picks a free port below the range the system hands out for
+// outgoing connections and ":0". Tests restart the catcher on the same
+// ports, and a port from that range can be taken by another program (or
+// another test package) in between.
 func freePort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 100 {
+		port := 20000 + rand.IntN(12000) // ephemeral ports start at 32768 (Linux) or 49152 (macOS, Windows)
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err == nil {
+			l.Close()
+			return port
+		}
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("no free port")
+	return 0
 }
 
 func startCatcher(t *testing.T) *Catcher {

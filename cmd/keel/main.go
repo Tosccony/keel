@@ -39,6 +39,7 @@ func main() {
 		return
 	}
 
+	setup.ClearQuarantine() // before anything runs a bundled program
 	a := app.NewWithID("io.github.tosccony.keel")
 	a.Settings().SetTheme(keelTheme{})
 	a.SetIcon(appIcon)

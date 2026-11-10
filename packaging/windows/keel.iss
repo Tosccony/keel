@@ -12,6 +12,14 @@
 #ifndef SourceExe
   #define SourceExe "..\..\dist\windows\keel.exe"
 #endif
+; The runtimes Keel ships (scripts/fetch-runtimes.sh windows-x86_64 ...),
+; and Microsoft's Visual C++ runtime, which Apache and PHP need.
+#ifndef RuntimeDir
+  #define RuntimeDir "..\..\dist\runtimes\windows-x86_64"
+#endif
+#ifndef VCRedist
+  #define VCRedist "..\..\dist\vc_redist.x64.exe"
+#endif
 
 [Setup]
 ; AppId identifies Keel for upgrades and uninstall. Never change it.
@@ -45,10 +53,18 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "keel.exe"; Flags: ignoreversion
 Source: "keel.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#RuntimeDir}\mariadb\*"; DestDir: "{app}\mariadb"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#RuntimeDir}\apache\*"; DestDir: "{app}\apache"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#RuntimeDir}\php\*"; DestDir: "{app}\php"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#RuntimeDir}\phpmyadmin\*"; DestDir: "{app}\phpmyadmin"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#VCRedist}"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{autoprograms}\Keel"; Filename: "{app}\keel.exe"; IconFilename: "{app}\keel.ico"
 Name: "{autodesktop}\Keel"; Filename: "{app}\keel.exe"; IconFilename: "{app}\keel.ico"; Tasks: desktopicon
 
 [Run]
+; Installs or updates Microsoft's Visual C++ runtime; does nothing if a newer
+; one is there.
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Flags: waituntilterminated
 Filename: "{app}\keel.exe"; Description: "{cm:LaunchProgram,Keel}"; Flags: nowait postinstall skipifsilent

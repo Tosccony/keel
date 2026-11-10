@@ -66,7 +66,10 @@ if echo "$page" | grep -q MISSING; then fail "PHP is missing extensions"; fi
 echo "$page" | grep -q "upload=64M" || fail "Keel's php.ini wasn't used"
 [ "$(curl -fsS "http://127.0.0.1:$port/shop/p/7")" = "product 7" ] || fail ".htaccess rewrite didn't work"
 if [ -n "$PMA" ]; then
-  curl -fsS "http://127.0.0.1:$port/phpmyadmin/" | grep -q "phpMyAdmin" || fail "phpMyAdmin didn't load"
+  # Read the whole page first: grep -q stops reading at the first match,
+  # and with pipefail curl's "Failed writing body" would fail the check.
+  pma="$(curl -fsS "http://127.0.0.1:$port/phpmyadmin/")" || fail "phpMyAdmin didn't load"
+  grep -q "phpMyAdmin" <<<"$pma" || fail "phpMyAdmin's page isn't phpMyAdmin"
   echo "phpMyAdmin loads"
 fi
 perl_out="$(curl -fsS "http://127.0.0.1:$port/hello.pl")" || fail "hello.pl didn't run"

@@ -1,4 +1,6 @@
-# Builds the installers for Windows, macOS and Linux.
+# Builds the installers for Windows, macOS and Linux, each with the MariaDB,
+# Apache, PHP and phpMyAdmin that the MariaDB and Web workflows published
+# (scripts/fetch-runtimes.sh).
 # - Push a tag like v0.1.0 to build and publish a GitHub release.
 # - Run it by hand (Actions tab > Release > Run workflow) to test the builds
 #   without publishing anything; the installers appear as run artifacts.
@@ -52,6 +54,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist\windows | Out-Null
           go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$env:VERSION" -o dist\windows\keel.exe ./cmd/keel
+      - name: Download the runtimes
+        shell: bash
+        run: scripts/fetch-runtimes.sh windows-x86_64 dist/runtimes/windows-x86_64
+      - name: Download the Visual C++ runtime installer
+        shell: pwsh
+        run: Invoke-WebRequest https://aka.ms/vc14/vc_redist.x64.exe -OutFile dist\vc_redist.x64.exe
       - name: Install Inno Setup
         shell: pwsh
         run: |
@@ -80,6 +88,8 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Download the runtimes
+        run: scripts/fetch-runtimes.sh macos-universal dist/runtimes/macos-universal
       - name: Build universal app and disk image
         run: scripts/package-macos.sh "$VERSION"
       - uses: actions/upload-artifact@v6
@@ -105,6 +115,8 @@ jobs:
           sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols
       - name: Install nfpm
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
+      - name: Download the runtimes
+        run: scripts/fetch-runtimes.sh linux-x86_64 dist/runtimes/linux-x86_64
       - name: Build binary and packages
         run: scripts/package-linux.sh "$VERSION"
       - uses: actions/upload-artifact@v6

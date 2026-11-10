@@ -26,6 +26,19 @@ contents:
     dst: /usr/share/icons/hicolor/512x512/apps/keel.png
   - src: ./cmd/keel/icon.svg
     dst: /usr/share/icons/hicolor/scalable/apps/keel.svg
+  # The runtimes, where Keel looks for them: /usr/lib/keel beside /usr/bin.
+  - src: ./dist/runtimes/linux-x86_64/mariadb
+    dst: /usr/lib/keel/mariadb
+    type: tree
+  - src: ./dist/runtimes/linux-x86_64/apache
+    dst: /usr/lib/keel/apache
+    type: tree
+  - src: ./dist/runtimes/linux-x86_64/php
+    dst: /usr/lib/keel/php
+    type: tree
+  - src: ./dist/runtimes/linux-x86_64/phpmyadmin
+    dst: /usr/lib/keel/phpmyadmin
+    type: tree
 
 overrides:
   deb:
@@ -34,3 +47,6 @@ overrides:
   rpm:
     depends:
       - mesa-libGL
+      # MariaDB's official build needs libcrypt.so.1, which Fedora and RHEL
+      # keep in this package.
+      - libxcrypt-compat
