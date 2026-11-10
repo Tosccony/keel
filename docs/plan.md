@@ -37,12 +37,12 @@ offers, and must do each part more safely and more simply.
 
 ## Order of work
 
-1. **Several parts in one window.** A generic "part" (start, stop, status, ports, menu) and a card for each; a settings file for the websites folder, ports and autostart; the first-run question about the websites folder. MariaDB becomes the first part.
-2. **Mail catcher** and **FTP server**: pure Go, built in.
-3. **Apache and PHP**, then **phpMyAdmin**: developed against this Mac's Apache and Homebrew's PHP, like the MariaDB lab.
-4. **Bundled Apache, PHP and phpMyAdmin** for all three systems, tested in CI like MariaDB, and **all runtimes in the installers**.
-5. **Perl** and **Tomcat**, downloaded when first turned on.
-6. **Control-panel extras**: ports view, terminal, logs, autostart, and the background service.
-7. **Loose ends**: TLS on Windows on ARM; stopping MariaDB on Windows after a student sets a root password.
+1. ✅ **Several parts in one window**, settings, the first-run question about the websites folder.
+2. ✅ **Mail catcher** and **FTP server**.
+3. ✅ **Apache and PHP**, then **phpMyAdmin**.
+4. **Bundled runtimes and installers.** ✅ MariaDB, Apache, PHP and phpMyAdmin are built and tested for all three systems in CI (`mariadb.yml`, `web.yml`). Next: publish them and put them into the installers, with the Visual C++ runtime on Windows.
+5. ✅ **Perl** and **Tomcat**, downloaded when first turned on.
+6. **Control-panel extras.** ✅ Ports view, Terminal, logs in each menu, autostart, the tray icon, opening at sign-in, Settings. ✅ A system shutdown or sign-out now counts as a clean stop when MariaDB's own log confirms it, which covers most of what the background service was for.
+7. **Loose ends**: TLS on Windows on ARM; stopping MariaDB on Windows after a student sets a root password; HTTPS for the web server.
 
 Each step ships with tests and is committed on its own.

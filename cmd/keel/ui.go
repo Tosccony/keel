@@ -71,10 +71,14 @@ type ui struct {
 
 	lastWhy string // last reported reason for an unclean shutdown, so it's logged once
 
-	parts    []*part         // the other parts: web server, mail catcher, FTP server...
-	web      *part           // the web server, shown above MariaDB
-	settings *setup.Settings // nil in tests that don't need it
-	sites    string          // the websites folder, shown in the status bar
+	parts []*part // the other parts: web server, mail catcher, FTP server...
+	web   *part   // the web server, shown above MariaDB
+
+	// toolPaths are the folders of Keel's programs (mariadb, php, perl),
+	// for the terminal's PATH.
+	toolPaths func() []string
+	settings  *setup.Settings // nil in tests that don't need it
+	sites     string          // the websites folder, shown in the status bar
 
 }
 
@@ -156,9 +160,16 @@ func (u *ui) header() fyne.CanvasObject {
 	ver := muted(v)
 	ver.SizeName = theme.SizeNameCaptionText
 
+	terminal := widget.NewButtonWithIcon("Terminal", theme.ComputerIcon(), u.openTerminal)
+	terminal.Importance = widget.LowImportance
+	portsButton := widget.NewButtonWithIcon("Ports", theme.ListIcon(), u.showPorts)
+	portsButton.Importance = widget.LowImportance
+	settingsButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), u.showSettings)
+	settingsButton.Importance = widget.LowImportance
 	row := container.NewBorder(nil, nil,
 		hstack(6, container.NewCenter(logo), container.NewCenter(words)),
-		container.NewCenter(ver))
+		hstack(4, container.NewCenter(terminal), container.NewCenter(portsButton),
+			container.NewCenter(settingsButton), container.NewCenter(ver)))
 	return vstack(0, newBar(row, fyne.NewSize(16, 10)), widget.NewSeparator())
 }
 

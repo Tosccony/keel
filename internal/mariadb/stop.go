@@ -225,11 +225,11 @@ func (s *Server) stopped(res StopResult, began time.Time, logStart int64) StopRe
 		s.child = nil
 	}
 	// Only a stop MariaDB's log confirms counts as clean.
-	state := stateStopped
+	state, pid := stateStopped, 0
 	if !res.Confirmed {
-		state = stateUnconfirmed
+		state, pid = stateUnconfirmed, res.PID // kept, so a confirmation logged later still counts
 	}
-	if err := s.setJournal(state, 0); err != nil {
+	if err := s.setJournal(state, pid); err != nil {
 		s.progress("Couldn't update Keel's journal: " + err.Error())
 	}
 	s.pruneSnapshots("")

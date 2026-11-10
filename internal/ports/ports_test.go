@@ -129,3 +129,23 @@ func TestHolderString(t *testing.T) {
 		}
 	}
 }
+
+func TestListeningFindsThisProcess(t *testing.T) {
+	port := listen(t, "127.0.0.1:0")
+	list, err := Listening(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i, l := range list {
+		if i > 0 && list[i-1].Port > l.Port {
+			t.Errorf("not sorted: %d before %d", list[i-1].Port, l.Port)
+		}
+		if l.Port == port && int(l.PID) == os.Getpid() {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("port %d (this test) isn't listed among %d listeners", port, len(list))
+	}
+}

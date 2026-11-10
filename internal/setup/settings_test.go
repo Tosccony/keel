@@ -97,3 +97,18 @@ func TestMovePortSkipsOtherPartsPorts(t *testing.T) {
 		t.Errorf("a free port moved: %d, %q", same, note)
 	}
 }
+
+func TestQuitOnCloseAndPerlSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keel-settings.json")
+	s := OpenSettings(path)
+	if s.QuitOnClose() || s.Perl() {
+		t.Fatal("both should be off by default")
+	}
+	s.SetQuitOnClose(true)
+	s.SetPerl(true)
+	forgetSettings(path)
+	again := OpenSettings(path)
+	if !again.QuitOnClose() || !again.Perl() {
+		t.Error("the settings didn't survive a restart")
+	}
+}

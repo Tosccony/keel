@@ -15,24 +15,34 @@ func TestNeedsRecovery(t *testing.T) {
 		j         journal
 		jerr      error
 		ev        logEvidence
+		cleanEnd  bool // MariaDB's log confirms the journal's run shut down cleanly
 		wantDirty bool
 		wantWhy   string
 	}{
-		{"no journal", journal{}, errNoJournal, logNoEvidence, true, "no record"},
-		{"unreadable journal", journal{}, errors.New("unreadable journal: bad"), logNoEvidence, true, "can't be read"},
-		{"clean stop", journal{State: stateStopped}, nil, logNoEvidence, false, ""},
-		{"clean stop, log agrees", journal{State: stateStopped}, nil, logCleanShutdown, false, ""},
-		{"clean stop, but log shows a later start", journal{State: stateStopped}, nil, logStartedNotStopped, true, "started again"},
-		{"was running", journal{State: stateRunning}, nil, logCleanShutdown, true, "still running"},
-		{"was stopping", journal{State: stateStopping}, nil, logCleanShutdown, true, "middle of stopping"},
-		{"was killed", journal{State: stateKilled}, nil, logNoEvidence, true, "force-stopped"},
-		{"stop not confirmed", journal{State: stateUnconfirmed}, nil, logNoEvidence, true, "wasn't confirmed"},
-		{"empty state", journal{}, nil, logNoEvidence, true, "unknown state"},
-		{"unknown state", journal{State: "paused"}, nil, logNoEvidence, true, "unknown state"},
+		{"no journal", journal{}, errNoJournal, logNoEvidence, false, true, "no record"},
+		{"unreadable journal", journal{}, errors.New("unreadable journal: bad"), logNoEvidence, false, true, "can't be read"},
+		{"clean stop", journal{State: stateStopped}, nil, logNoEvidence, false, false, ""},
+		{"clean stop, log agrees", journal{State: stateStopped}, nil, logCleanShutdown, false, false, ""},
+		{"clean stop, but log shows a later start", journal{State: stateStopped}, nil, logStartedNotStopped, false, true, "started again"},
+		{"was running", journal{State: stateRunning}, nil, logCleanShutdown, false, true, "still running"},
+		{"was stopping", journal{State: stateStopping}, nil, logCleanShutdown, false, true, "middle of stopping"},
+		{"was killed", journal{State: stateKilled}, nil, logNoEvidence, false, true, "force-stopped"},
+		{"stop not confirmed", journal{State: stateUnconfirmed}, nil, logNoEvidence, false, true, "wasn't confirmed"},
+		{"empty state", journal{}, nil, logNoEvidence, false, true, "unknown state"},
+		{"unknown state", journal{State: "paused"}, nil, logNoEvidence, false, true, "unknown state"},
+		// The computer shut down, or someone ran SHUTDOWN: MariaDB stopped
+		// cleanly by itself, and its log says so for the very run Keel recorded.
+		{"was running, MariaDB's log confirms that run stopped cleanly", journal{State: stateRunning, PID: 7}, nil, logCleanShutdown, true, false, ""},
+		{"was stopping, and the stop finished cleanly", journal{State: stateStopping, PID: 7}, nil, logCleanShutdown, true, false, ""},
+		{"stop confirmed in the log later", journal{State: stateUnconfirmed, PID: 7}, nil, logCleanShutdown, true, false, ""},
+		// A kill can't write "Shutdown complete", and the special flows keep
+		// their own rules, whatever the log says.
+		{"killed, even if the log looks clean", journal{State: stateKilled, PID: 7}, nil, logCleanShutdown, true, true, "force-stopped"},
+		{"restored, even if the log looks clean", journal{State: stateRestored, PID: 7}, nil, logCleanShutdown, true, true, "restored"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dirty, why := needsRecovery(tt.j, tt.jerr, tt.ev)
+			dirty, why := needsRecovery(tt.j, tt.jerr, tt.ev, tt.cleanEnd)
 			if dirty != tt.wantDirty || !strings.Contains(why, tt.wantWhy) {
 				t.Errorf("needsRecovery = %v, %q; want %v and a reason containing %q", dirty, why, tt.wantDirty, tt.wantWhy)
 			}
@@ -186,5 +196,39 @@ func TestSetJournalKeepsSnapshotUntilCleanStop(t *testing.T) {
 	s.setJournal(stateStopped, 0)
 	if j, _ := readJournal(s.journalFile()); j.Snapshot != "" {
 		t.Errorf("a clean stop should forget the snapshot, got %q", j.Snapshot)
+	}
+}
+
+// runEndedCleanly only trusts the log for the run Keel recorded. A crash
+// early in a new start must not borrow the previous run's clean shutdown.
+func TestRunEndedCleanly(t *testing.T) {
+	const (
+		start100 = "2026-11-10 10:00:00 0 [Note] Starting MariaDB 11.8.9-MariaDB source revision abc server_uid x as process 100"
+		start200 = "2026-11-10 11:00:00 0 [Note] Starting MariaDB 11.8.9-MariaDB source revision abc server_uid x as process 200"
+		ready    = "2026-11-10 10:00:01 0 [Note] /keel/mariadb/bin/mariadbd: ready for connections."
+		down     = "2026-11-10 10:30:00 0 [Note] /keel/mariadb/bin/mariadbd: Shutdown complete"
+	)
+	for _, tt := range []struct {
+		name string
+		log  []string
+		pid  int
+		want bool
+	}{
+		{"the recorded run stopped cleanly", []string{start100, ready, down}, 100, true},
+		{"a different process's clean stop", []string{start100, ready, down}, 200, false},
+		{"crash early in the next start", []string{start100, ready, down, start200}, 200, false},
+		{"and the old run doesn't count once a new one began", []string{start100, ready, down, start200}, 100, false},
+		{"the recorded run never stopped", []string{start100, ready}, 100, false},
+		{"no PID recorded", []string{start100, ready, down}, 0, false},
+		{"Windows line endings", []string{start100 + "\r", ready + "\r", down + "\r"}, 100, true},
+	} {
+		path := filepath.Join(t.TempDir(), "mariadb.log")
+		os.WriteFile(path, []byte(strings.Join(tt.log, "\n")+"\n"), 0o644)
+		if got := runEndedCleanly(path, tt.pid); got != tt.want {
+			t.Errorf("%s: runEndedCleanly = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+	if runEndedCleanly(filepath.Join(t.TempDir(), "missing.log"), 100) {
+		t.Error("a missing log can't confirm anything")
 	}
 }

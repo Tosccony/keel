@@ -268,3 +268,41 @@ func TestTaskRestartsARunningPart(t *testing.T) {
 		t.Errorf("a failed task shouldn't restart, and should say so: %d starts, %q", f.starts, p.logLines())
 	}
 }
+
+func TestOurPortsNamesKeelsParts(t *testing.T) {
+	u, _ := newTestUI(t)
+	home := t.TempDir()
+	opts := setup.Options{Home: home}
+	st := opts.Settings()
+	st.SetPort(setup.PartMail, 2525)
+	st.SetPort(setup.PartFTP, 2121)
+	u.parts = []*part{
+		newPart(u.window, newMailService(opts), st),
+		newPart(u.window, newFTPService(opts), st),
+	}
+	got := u.ourPorts()
+	if got[3307] != "MariaDB" || got[2525] != "Mail catcher" || got[2121] != "FTP server" || got[8025] != "Mail inbox page" {
+		t.Errorf("ourPorts = %v (ports %v)", got, sortedKeys(got))
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	for in, want := range map[string]string{"/plain/path": "'/plain/path'", "it's": `'it'\''s'`, "/a b/c": "'/a b/c'"} {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestSettingsDialogOpens(t *testing.T) {
+	u, w := newTestUI(t)
+	u.settings = setup.OpenSettings(filepath.Join(t.TempDir(), "keel-settings.json"))
+	u.setSites("/Users/student/Documents/Keel/htdocs")
+	u.showSettings()
+	if w.Canvas().Overlays().Top() == nil {
+		t.Error("the settings dialog didn't open")
+	}
+	if u.settings.QuitOnClose() {
+		t.Error("by default, closing the window should keep Keel in the tray")
+	}
+}

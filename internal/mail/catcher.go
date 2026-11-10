@@ -38,6 +38,7 @@ type Catcher struct {
 
 	mu      sync.Mutex
 	smtp    net.Listener
+	webL    net.Listener // closed by Stop itself: Shutdown misses it if Serve hasn't begun yet
 	web     *http.Server
 	conns   sync.WaitGroup
 	running bool
@@ -63,7 +64,7 @@ func (c *Catcher) Start() error {
 		smtpL.Close()
 		return fmt.Errorf("mail: inbox page port %d: %w", c.WebPort, err)
 	}
-	c.smtp = smtpL
+	c.smtp, c.webL = smtpL, webL
 	c.web = &http.Server{Handler: c.handler(), ReadHeaderTimeout: 10 * time.Second}
 	c.running = true
 	go c.serveSMTP(smtpL)
@@ -80,11 +81,12 @@ func (c *Catcher) Stop(ctx context.Context) error {
 		return nil
 	}
 	c.running = false
-	smtpL, web := c.smtp, c.web
+	smtpL, webL, web := c.smtp, c.webL, c.web
 	c.mu.Unlock()
 
 	smtpL.Close()
 	err := web.Shutdown(ctx)
+	webL.Close()
 	done := make(chan struct{})
 	go func() { c.conns.Wait(); close(done) }()
 	select {

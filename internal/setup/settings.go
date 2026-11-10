@@ -52,7 +52,8 @@ type settingsFile struct {
 	Autostart   []string       `json:"autostart,omitempty"`
 	FTPUser     string         `json:"ftpUser,omitempty"`
 	FTPPassword string         `json:"ftpPassword,omitempty"`
-	Perl        bool           `json:"perl,omitempty"` // run .pl and .cgi files in the websites folder
+	Perl        bool           `json:"perl,omitempty"`        // run .pl and .cgi files in the websites folder
+	QuitOnClose bool           `json:"quitOnClose,omitempty"` // closing the window quits, instead of keeping Keel in the tray
 }
 
 var (
@@ -175,6 +176,23 @@ func (s *Settings) SetPerl(on bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data.Perl = on
+	return s.save()
+}
+
+// QuitOnClose reports whether closing the window quits Keel. By default it
+// hides the window and Keel keeps running in the tray, so the mail catcher
+// and FTP server keep working.
+func (s *Settings) QuitOnClose() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.QuitOnClose
+}
+
+// SetQuitOnClose saves what closing the window does.
+func (s *Settings) SetQuitOnClose(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.QuitOnClose = on
 	return s.save()
 }
 

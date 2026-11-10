@@ -1,4 +1,4 @@
-# Crash-safety test cases
+# Test cases
 
 Keel's main promise is that the database survives anything short of a dead
 disk. This page lists every case we test or plan to test. Automated cases
@@ -165,29 +165,58 @@ Repair works even when MariaDB won't start. These cases use real MariaDB and the
 | 95 | The ⋯ menu follows the state: Check only while running, everything off while busy | `TestMoreMenuFollowsState` |
 | 96 | Back up, Restore and Repair report their result and put the card back | `TestMaintenanceRunsWorkThenReports` |
 
+### Shutting down without Keel
+
+| # | Case | Test |
+|---|---|---|
+| 117 | The computer shuts down or the user signs out: the system sends SIGTERM, MariaDB stops cleanly by itself, and its log confirms it, so the next start needs no recovery | `TestSystemShutdownSignalIsClean` |
+| 118 | The log is trusted only for the run Keel recorded (same PID, no later start): a crash early in a new start doesn't borrow the previous run's clean shutdown | `TestRunEndedCleanly`, `TestNeedsRecovery` |
+| 119 | A stop Keel couldn't confirm counts as clean once MariaDB's own log shows that run shut down cleanly; without the line it stays unclean | `TestConfirmationInTheLogCountsLater`, `TestUnconfirmedStopCountsAsUnclean` |
+
+### The other parts
+
+| # | Case | Test |
+|---|---|---|
+| 120 | Mail catcher: plain mail with a Bcc only the envelope knows; HTML with a text alternative, encoded headers and a base64 attachment; dot-stuffing; long lines; any login accepted | `TestCatchesPlainMail`, `TestCatchesHTMLMailWithAttachment`, `TestSMTPEdgeCases` |
+| 121 | Mail catcher's inbox page: the email's HTML is sandboxed, paths outside the inbox are refused, and a foreign Host header (DNS rebinding) gets nothing | `TestInboxPageAndAPI` |
+| 122 | Mail catcher: start, stop, restart at once, a taken port, oldest mail pruned | `TestStartAndStop`, `TestOldMessagesArePruned` |
+| 123 | PHP's mail() on macOS and Linux goes through "keel --sendmail": recipients from headers or arguments, Bcc removed, a clear error when the catcher is stopped | `TestSendmailStandIn`, `TestWebPartServesPHPAndCatchesItsMail` |
+| 124 | FTP server: upload, list, download, rename, delete; wrong logins refused; nothing outside the websites folder is reachable | `TestUploadListDownload`, `TestWrongLoginIsRefused`, `TestCantLeaveTheWebsitesFolder` |
+| 125 | Web server: PHP with Keel's php.ini, .htaccess rewrites, .htaccess hidden, the user's custom.conf and custom.ini read and never overwritten | `TestServesPHP`, `TestCustomSettings` |
+| 126 | Web server: a mistake in custom.conf is reported before Apache starts; a taken port isn't mistaken for Apache answering; PHP-FPM is stopped if Apache fails | `TestCustomSettings`, `TestStartFailsCleanly` |
+| 127 | Web server found again after Keel restarts, and both Apache and PHP-FPM stop | `TestServesPHP` |
+| 128 | phpMyAdmin logs in to a real MariaDB as root, on MariaDB's current port; its config is valid PHP even with an apostrophe in a path | `TestPHPMyAdminReachesMariaDB`, `TestPHPMyAdminConfig` |
+| 129 | Perl CGI scripts run (macOS and Linux through their #! line; Windows through the registry, checked in CI) | `TestPerlCGI`, `scripts/test-web-runtime.sh` |
+| 130 | Tomcat downloads on the first start (checksum checked), serves its welcome JSP, and stops | `TestTomcatPart` (with `KEEL_TEST_DOWNLOADS=1`) |
+| 131 | Downloads: zip and tar.gz, next mirror on failure, bad checksum installs nothing, entries outside the folder refused, reinstall replaces | `internal/fetch` tests |
+| 132 | Helper processes: found again by PID file only when the command line matches, stopped, forced after a timeout | `internal/proc` tests |
+| 133 | Settings: ports, websites folder, autostart, FTP login and the rest survive a restart; parts saving at once don't undo each other; older files are read; a moved part skips other parts' ports | `internal/setup` tests |
+| 134 | Opening at sign-in: on and off (macOS LaunchAgent, Linux autostart entry; Windows' Run key in CI) | `TestStartAtSignIn` |
+| 135 | Every promised PHP extension, Keel's php.ini, a rewrite, Perl and phpMyAdmin on each system's built Apache and PHP | `scripts/test-web-runtime.sh` in the Web workflow |
+
 ## Still to cover
 
 These need real hardware, features that aren't built yet, or a longer run.
 
 | # | Case | Why it matters | Blocked on |
 |---|---|---|---|
-| 97 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
-| 98 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
-| 99 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
-| 100 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
-| 101 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
-| 102 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
-| 103 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
-| 104 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
-| 105 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
-| 106 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
-| 107 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
-| 108 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
-| 109 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
-| 110 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Manual test |
-| 111 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
-| 112 | A port held by another user's program or a system service (XAMPP's MySQL installed as a Windows service) | Windows names it; macOS and Linux can only say "another program" without admin rights | Windows support |
-| 113 | InnoDB damage that stops MariaDB starting at all | Repair can't fix InnoDB in place; the answer is a restore, or innodb_force_recovery and a dump | Manual test |
-| 114 | Keel killed while repair mode is running | MariaDB keeps running without account checks until stopped; the window should say so | Add an automated test |
-| 115 | Repair on Windows (aria_chk.exe, Windows paths) | The XAMPP errors are mostly seen on Windows | Windows support |
-| 116 | Root has a password on **Windows** | No SIGTERM there, so Stop can't shut MariaDB down and ends at the force-stop prompt. Needs Keel's own admin account or a named-pipe login | Windows support |
+| 136 | Power cut to the whole machine during writes (`prlctl stop "Windows 11" --kill`) | The real XAMPP failure | Windows support |
+| 137 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
+| 138 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
+| 139 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
+| 140 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
+| 141 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
+| 142 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
+| 143 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
+| 144 | Multi-GB databases | Copy and check time, progress feedback | Manual test |
+| 145 | Clock or time-zone changes | Copy names and pruning use local time | Add an automated test |
+| 146 | Backups folder read-only or full | Clear message, MariaDB not started | Add an automated test |
+| 147 | Data folder moved or renamed between runs | Journal and backups follow the folder | Add an automated test |
+| 148 | MariaDB upgraded between an unclean shutdown and the next start | Recovering with a newer version can be unsafe; should refuse | Upgrade handling |
+| 149 | Server started by hand with a *different* log file, then killed | Neither the journal nor the log sees it; MariaDB's own recovery still runs | Manual test |
+| 150 | 200 start/stop cycles under writes, plus an overnight soak | Phase 1 exit test | Torture-test command |
+| 151 | A port held by another user's program or a system service (XAMPP's MySQL installed as a Windows service) | Windows names it; macOS and Linux can only say "another program" without admin rights | Windows support |
+| 152 | InnoDB damage that stops MariaDB starting at all | Repair can't fix InnoDB in place; the answer is a restore, or innodb_force_recovery and a dump | Manual test |
+| 153 | Keel killed while repair mode is running | MariaDB keeps running without account checks until stopped; the window should say so | Add an automated test |
+| 154 | Repair on Windows (aria_chk.exe, Windows paths) | The XAMPP errors are mostly seen on Windows | Windows support |
+| 155 | Root has a password on **Windows** | No SIGTERM there, so Stop can't shut MariaDB down and ends at the force-stop prompt. Needs Keel's own admin account or a named-pipe login | Windows support |

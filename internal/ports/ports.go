@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -116,4 +117,52 @@ func Who(ctx context.Context, port int) (Holder, bool) {
 		return h, true
 	}
 	return Holder{}, false
+}
+
+// Listener is a program listening for connections.
+type Listener struct {
+	Port int
+	Addr string // the address it listens on, like 127.0.0.1 or 0.0.0.0
+	PID  int32
+	Name string // "" if the system won't say
+}
+
+// Listening lists every TCP port something listens on, lowest first, the
+// way XAMPP's Netstat button does. On macOS and Linux, other users'
+// programs show without a name unless Keel runs as an administrator.
+func Listening(ctx context.Context) ([]Listener, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	conns, err := gnet.ConnectionsWithContext(ctx, "tcp")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	names := map[int32]string{}
+	var list []Listener
+	for _, c := range conns {
+		if c.Status != "LISTEN" {
+			continue
+		}
+		key := fmt.Sprintf("%d/%s/%d", c.Laddr.Port, c.Laddr.IP, c.Pid)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		name, ok := names[c.Pid]
+		if !ok && c.Pid != 0 {
+			if p, err := process.NewProcessWithContext(ctx, c.Pid); err == nil {
+				name, _ = p.NameWithContext(ctx)
+			}
+			names[c.Pid] = name
+		}
+		list = append(list, Listener{Port: int(c.Laddr.Port), Addr: c.Laddr.IP, PID: c.Pid, Name: name})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Port != list[j].Port {
+			return list[i].Port < list[j].Port
+		}
+		return list[i].Addr < list[j].Addr
+	})
+	return list, nil
 }

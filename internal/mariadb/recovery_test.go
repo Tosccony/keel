@@ -142,9 +142,35 @@ func TestUnconfirmedStopCountsAsUnclean(t *testing.T) {
 	if j, _ := readJournal(s.journalFile()); j.State != stateUnconfirmed {
 		t.Errorf("journal state = %q, want %q", j.State, stateUnconfirmed)
 	}
+	// Make it truly unconfirmed: the real log loses its "Shutdown
+	// complete", as if MariaDB had died partway through shutting down.
+	b, _ := os.ReadFile(realLog)
+	var kept []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if !strings.HasSuffix(strings.TrimSpace(line), ": Shutdown complete") {
+			kept = append(kept, line)
+		}
+	}
+	os.WriteFile(realLog, []byte(strings.Join(kept, "\n")), 0o644)
 	rec := startAndRecover(t, s)
 	if !strings.Contains(rec.Reason, "wasn't confirmed") {
 		t.Errorf("reason = %q", rec.Reason)
+	}
+}
+
+// If Stop couldn't confirm the shutdown but MariaDB's log shows that very
+// run did shut down cleanly, it was a clean stop.
+func TestConfirmationInTheLogCountsLater(t *testing.T) {
+	s := startTestServer(t)
+	realLog := s.LogFile
+	s.LogFile = filepath.Join(t.TempDir(), "elsewhere.log") // Stop won't find "Shutdown complete"
+	res, err := s.Stop(context.Background())
+	s.LogFile = realLog
+	if err != nil || res.Confirmed {
+		t.Fatalf("stop: %+v, %v", res, err)
+	}
+	if clean, why := s.LastShutdown(); !clean {
+		t.Errorf("MariaDB's own log confirms the run shut down cleanly, but: %s", why)
 	}
 }
 

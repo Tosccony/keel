@@ -9,7 +9,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -30,6 +32,7 @@ func main() {
 	opts := setup.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	hidden := flag.Bool(strings.TrimPrefix(setup.HiddenFlag, "--"), false, "start in the tray, without the window (used at sign-in)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("keel", version)
@@ -45,7 +48,18 @@ func main() {
 	u.prepare = opts.Prepare
 	settings := opts.Settings()
 	u.settings = settings
-	u.web = newPart(u.window, newWebService(opts), settings)
+	webSvc := newWebService(opts)
+	u.web = newPart(u.window, webSvc, settings)
+	u.toolPaths = func() []string {
+		paths := []string{opts.BinDir}
+		if webSvc.server != nil && webSvc.server.PHP != "" {
+			paths = append(paths, filepath.Dir(webSvc.server.PHP))
+		}
+		if perl := opts.Perl(); perl != "" {
+			paths = append(paths, filepath.Dir(perl))
+		}
+		return paths
+	}
 	u.parts = append(u.parts,
 		u.web,
 		newPart(u.window, newMailService(opts), settings),
@@ -85,6 +99,11 @@ func main() {
 		fyne.Do(func() { u.askSites(settings, setup.DefaultSites(), autostart) })
 	}
 
+	u.setUpTray(a)
+	if *hidden {
+		a.Run() // started at sign-in: just the tray icon, until the user opens the window
+		return
+	}
 	w.ShowAndRun()
 }
 

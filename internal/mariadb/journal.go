@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -154,11 +156,49 @@ func readLogEvidence(path string) logEvidence {
 	}
 }
 
+// startPID matches the line MariaDB logs as each start begins, like
+// "[Note] Starting MariaDB 11.8.9-MariaDB source revision ... as process 1234".
+var startPID = regexp.MustCompile(`Starting MariaDB .* as process (\d+)`)
+
+// runEndedCleanly reports whether the log shows that the run Keel recorded,
+// process pid, shut down cleanly: the log's last start is that process,
+// and "Shutdown complete" follows it. That's what happens when the
+// computer shuts down or the user signs out: the system asks every program
+// to stop, and MariaDB stops cleanly by itself, without Keel.
+//
+// Matching the PID is what makes this safe. Without it, a crash early in
+// a new start (before anything is logged as ready) would look like the
+// previous run's clean shutdown.
+func runEndedCleanly(path string, pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	from := fileSize(path) - logTailBytes
+	if from < 0 {
+		from = 0
+	}
+	lastPID, downAfter := 0, false
+	for _, line := range readLinesFrom(path, from) {
+		line = strings.TrimSpace(line)
+		if m := startPID.FindStringSubmatch(line); m != nil {
+			lastPID, _ = strconv.Atoi(m[1])
+			downAfter = false
+		} else if strings.HasSuffix(line, ": Shutdown complete") {
+			downAfter = true
+		}
+	}
+	return lastPID == pid && downAfter
+}
+
 // needsRecovery decides whether the last shutdown was clean, and says why
 // not in plain words. It's deliberately suspicious: anything other than a
 // confirmed clean stop counts as unclean. An unneeded check costs a few
 // seconds; a missed one can cost a damaged database.
-func needsRecovery(j journal, jerr error, ev logEvidence) (bool, string) {
+//
+// cleanEnd is runEndedCleanly for the journal's PID: MariaDB's own log
+// confirming that the very run Keel recorded shut down cleanly, which
+// covers a stop Keel didn't ask for, such as the computer shutting down.
+func needsRecovery(j journal, jerr error, ev logEvidence, cleanEnd bool) (bool, string) {
 	switch {
 	case errors.Is(jerr, errNoJournal):
 		return true, "Keel has no record of how MariaDB last stopped."
@@ -171,6 +211,12 @@ func needsRecovery(j journal, jerr error, ev logEvidence) (bool, string) {
 			return true, "MariaDB's log shows it started again after its last clean stop and never shut down cleanly."
 		}
 		return false, ""
+	case stateRunning, stateStopping, stateUnconfirmed:
+		if cleanEnd {
+			return false, ""
+		}
+	}
+	switch j.State {
 	case stateRunning:
 		return true, "MariaDB was still running when it went away (a crash, a power cut, or a kill)."
 	case stateStopping:
@@ -208,6 +254,6 @@ func (s *Server) LastShutdown() (clean bool, reason string) {
 		return true, ""
 	}
 	j, err := readJournal(s.journalFile())
-	dirty, why := needsRecovery(j, err, readLogEvidence(s.LogFile))
+	dirty, why := needsRecovery(j, err, readLogEvidence(s.LogFile), runEndedCleanly(s.LogFile, j.PID))
 	return !dirty, why
 }

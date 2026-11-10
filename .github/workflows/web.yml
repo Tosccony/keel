@@ -60,6 +60,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
       - run: scripts/build-apache.sh
       - run: scripts/build-php.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # static-php-cli looks up releases; shared runners hit the anonymous limit
       - run: scripts/fetch-phpmyadmin.sh
       - run: scripts/test-web-runtime.sh dist/apache/linux-x86_64/apache dist/php/linux-x86_64/php dist/phpmyadmin
       - run: |
@@ -84,6 +86,8 @@ jobs:
       - uses: actions/checkout@v6
       - run: scripts/build-apache.sh ${{ matrix.arch }}
       - run: scripts/build-php.sh ${{ matrix.arch }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # static-php-cli looks up releases; shared runners hit the anonymous limit
       - run: |
           tar -czf apache-macos-${{ matrix.arch }}.tar.gz -C dist/apache/macos-${{ matrix.arch }} apache
           tar -czf php-macos-${{ matrix.arch }}.tar.gz -C dist/php/macos-${{ matrix.arch }} php

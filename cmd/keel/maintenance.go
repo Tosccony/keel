@@ -39,12 +39,14 @@ func (u *ui) moreMenu() *fyne.Menu {
 	folder.Icon = theme.FolderOpenIcon()
 	data := fyne.NewMenuItem("Open data folder", u.openDataFolder)
 	data.Icon = theme.FolderOpenIcon()
+	logItem := fyne.NewMenuItem("MariaDB log", func() { openFile(u.server.LogFile) })
+	logItem.Icon = theme.DocumentIcon()
 	if u.busy {
 		for _, it := range []*fyne.MenuItem{backup, restore, repair, check} {
 			it.Disabled = true
 		}
 	}
-	items := []*fyne.MenuItem{backup, restore, repair, fyne.NewMenuItemSeparator(), check, data, folder}
+	items := []*fyne.MenuItem{backup, restore, repair, fyne.NewMenuItemSeparator(), check, logItem, data, folder}
 	if u.settings != nil {
 		auto := fyne.NewMenuItem("Start when Keel opens", func() {
 			if err := u.settings.SetAutostart(setup.PartMariaDB, !u.settings.Autostart(setup.PartMariaDB)); err != nil {

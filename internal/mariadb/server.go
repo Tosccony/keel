@@ -162,7 +162,7 @@ func (s *Server) start(ctx context.Context, takeSnapshot bool) error {
 	// Was the last shutdown clean? If not, protect the data first.
 	j, jerr := readJournal(s.journalFile())
 	var rec *Recovery
-	if dirty, reason := needsRecovery(j, jerr, readLogEvidence(s.LogFile)); dirty {
+	if dirty, reason := needsRecovery(j, jerr, readLogEvidence(s.LogFile), runEndedCleanly(s.LogFile, j.PID)); dirty {
 		rec = &Recovery{Reason: reason}
 		s.progress("The last shutdown wasn't clean. " + reason)
 		switch {

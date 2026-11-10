@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestFailedRecoveryReusesFirstSnapshot(t *testing.T) {
@@ -69,5 +71,32 @@ func TestStartRefusesWhenJournalCantBeWritten(t *testing.T) {
 	}
 	if s.RunningPID() != 0 {
 		t.Error("MariaDB is running even though Start failed")
+	}
+}
+
+// When the computer shuts down or the user signs out, the system sends
+// every program SIGTERM, and MariaDB stops cleanly by itself without Keel.
+// Its log confirms that run's "Shutdown complete", so the next start needs
+// no recovery.
+func TestSystemShutdownSignalIsClean(t *testing.T) {
+	s := startTestServer(t)
+	pid := s.PID()
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Exited():
+	case <-time.After(30 * time.Second):
+		t.Fatal("MariaDB didn't stop on SIGTERM")
+	}
+	if clean, why := s.LastShutdown(); !clean {
+		t.Fatalf("after a clean stop by signal, LastShutdown says unclean: %s", why)
+	}
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopForCleanup(t, s) })
+	if rec := s.LastRecovery(); rec != nil {
+		t.Errorf("the next start ran recovery for a clean stop: %+v", rec)
 	}
 }
