@@ -2,51 +2,41 @@ package setup
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 
 	"github.com/Tosccony/keel/internal/mariadb"
 	"github.com/Tosccony/keel/internal/ports"
 )
 
-// settings are choices Keel made and keeps, like a port it moved to.
-type settings struct {
-	MariaDBPort int `json:"mariadbPort,omitempty"`
-}
+func (o Options) settingsFile() string { return filepath.Join(o.home(), "keel-settings.json") }
 
-func (o Options) settingsFile() string { return filepath.Join(o.Folder, "keel-settings.json") }
+// Settings returns the settings kept in Keel's folder.
+func (o Options) Settings() *Settings { return OpenSettings(o.settingsFile()) }
 
-func loadSettings(path string) (settings, error) {
-	var st settings
-	b, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return st, nil
+// MovePort makes sure port is free for a part of Keel. If another program
+// holds it, MovePort names that program, picks the next free port that no
+// other part of Keel is set to use, remembers it, and returns it with a
+// note for the user. The note is empty when nothing changed. name is the
+// part's name for the note, such as "MariaDB" or "the web server".
+func (o Options) MovePort(ctx context.Context, part, name string, port int) (int, string, error) {
+	if ports.Free(port) {
+		return port, "", nil
 	}
+	holder := "another program"
+	if h, ok := ports.Who(ctx, port); ok {
+		holder = h.String()
+	}
+	st := o.Settings()
+	next, err := ports.Next(port+1, st.takenByOthers(part))
 	if err != nil {
-		return st, err
+		return port, "", fmt.Errorf("port %d is in use by %s, and there's %w", port, holder, err)
 	}
-	return st, json.Unmarshal(b, &st)
-}
-
-// saveSettings writes the file whole or not at all.
-func saveSettings(path string, st settings) error {
-	b, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
+	note := fmt.Sprintf("Port %d is in use by %s, so %s will use port %d from now on.", port, holder, name, next)
+	if err := st.SetPort(part, next); err != nil {
+		note += fmt.Sprintf(" (Keel couldn't save that for next time: %v)", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return next, note, nil
 }
 
 // ChoosePort makes sure MariaDB's port is free before a start.
@@ -57,21 +47,13 @@ func saveSettings(path string, st settings) error {
 // happened, for the user; it's empty when nothing changed. A MariaDB that's
 // already running keeps its port.
 func (o Options) ChoosePort(ctx context.Context, s *mariadb.Server) (note string, err error) {
-	if s.RunningPID() != 0 || ports.Free(s.Port) {
+	if s.RunningPID() != 0 {
 		return "", nil
 	}
-	holder := "another program"
-	if h, ok := ports.Who(ctx, s.Port); ok {
-		holder = h.String()
-	}
-	next, err := ports.Next(s.Port+1, nil)
+	port, note, err := o.MovePort(ctx, PartMariaDB, "MariaDB", s.Port)
 	if err != nil {
-		return "", fmt.Errorf("port %d is in use by %s, and there's %w", s.Port, holder, err)
+		return "", err
 	}
-	note = fmt.Sprintf("Port %d is in use by %s, so MariaDB will use port %d from now on.", s.Port, holder, next)
-	if err := saveSettings(o.settingsFile(), settings{MariaDBPort: next}); err != nil {
-		note += fmt.Sprintf(" (Keel couldn't save that for next time: %v)", err)
-	}
-	s.Port = next
+	s.Port = port
 	return note, nil
 }

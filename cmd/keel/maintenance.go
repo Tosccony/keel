@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/Tosccony/keel/internal/mariadb"
+	"github.com/Tosccony/keel/internal/setup"
 )
 
 // The MariaDB card's ⋯ menu (Back up now, Restore a copy, Repair, Check
@@ -36,12 +37,24 @@ func (u *ui) moreMenu() *fyne.Menu {
 	check.Disabled = u.pidNow == 0
 	folder := fyne.NewMenuItem("Open backups folder", u.openBackups)
 	folder.Icon = theme.FolderOpenIcon()
+	data := fyne.NewMenuItem("Open data folder", u.openDataFolder)
+	data.Icon = theme.FolderOpenIcon()
 	if u.busy {
 		for _, it := range []*fyne.MenuItem{backup, restore, repair, check} {
 			it.Disabled = true
 		}
 	}
-	return fyne.NewMenu("", backup, restore, repair, fyne.NewMenuItemSeparator(), check, folder)
+	items := []*fyne.MenuItem{backup, restore, repair, fyne.NewMenuItemSeparator(), check, data, folder}
+	if u.settings != nil {
+		auto := fyne.NewMenuItem("Start when Keel opens", func() {
+			if err := u.settings.SetAutostart(setup.PartMariaDB, !u.settings.Autostart(setup.PartMariaDB)); err != nil {
+				u.log(bad, "Couldn't save that: "+err.Error())
+			}
+		})
+		auto.Checked = u.settings.Autostart(setup.PartMariaDB)
+		items = append(items, fyne.NewMenuItemSeparator(), auto)
+	}
+	return fyne.NewMenu("", items...)
 }
 
 func (u *ui) showMoreMenu() {

@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 
 	"github.com/Tosccony/keel/internal/mariadb"
+	"github.com/Tosccony/keel/internal/setup"
 )
 
 func newTestUI(t *testing.T) (*ui, fyne.Window) {
@@ -35,7 +36,7 @@ func newThemedTestUI(t *testing.T, th fyne.Theme) (*ui, fyne.Window) {
 	u.recheck = func() {}
 	u.later = func(time.Duration, func()) {}
 	w.SetContent(u.content())
-	w.Resize(fyne.NewSize(780, 540))
+	w.Resize(fyne.NewSize(820, 720))
 	return u, w
 }
 
@@ -447,7 +448,11 @@ func TestScreenshot(t *testing.T) {
 	}{{"dark", theme.VariantDark}, {"light", theme.VariantLight}} {
 		u, w := newThemedTestUI(t, fixedVariant{v: mode.v})
 		u.server.DataDir = "/Users/kody/personal/keel-lab/data"
-		u.folder.SetText(u.server.DataDir)
+		home := t.TempDir()
+		u.parts = []*part{newPart(u.window, newMailService(setup.Options{Home: home}),
+			setup.OpenSettings(filepath.Join(home, "keel-settings.json")))}
+		w.SetContent(u.content())
+		u.setSites("/Users/kody/Documents/Keel/htdocs")
 		u.setVersion("13.0.2")
 		u.log(info, "Watching the MariaDB in /Users/kody/personal/keel-lab/data.")
 		u.applyCheck(0, false, "MariaDB was still running when it went away (a crash, a power cut, or a kill).")

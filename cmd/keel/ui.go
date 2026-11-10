@@ -18,46 +18,8 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/Tosccony/keel/internal/mariadb"
+	"github.com/Tosccony/keel/internal/setup"
 )
-
-// maxLogLines keeps the activity log from growing forever. Old lines are
-// dropped logTrim at a time, so most new lines are a cheap append.
-const (
-	maxLogLines = 500
-	logTrim     = 50
-)
-
-// level is how an activity log line is marked.
-type level int
-
-const (
-	info level = iota
-	good
-	warn
-	bad
-)
-
-type logEntry struct {
-	at  time.Time
-	lvl level
-	msg string
-}
-
-func (e logEntry) String() string { return e.at.Format("15:04:05") + "  " + e.msg }
-
-// icon is the mark shown beside a log line; info lines have none. It's
-// looked up when needed, because theme icons need the app to exist.
-func (l level) icon() fyne.Resource {
-	switch l {
-	case good:
-		return theme.NewSuccessThemedResource(theme.ConfirmIcon())
-	case warn:
-		return theme.NewWarningThemedResource(theme.WarningIcon())
-	case bad:
-		return theme.NewErrorThemedResource(theme.ErrorIcon())
-	}
-	return nil
-}
 
 // ui is Keel's control window: a header, a card per service, a warning
 // banner after an unclean shutdown, the activity log and a status bar.
@@ -66,7 +28,8 @@ func (l level) icon() fyne.Resource {
 // check run in goroutines, take mu (mariadb.Server isn't safe for concurrent
 // use), and hand their results back with fyne.Do.
 type ui struct {
-	win    fyne.Window
+	*window // the activity log and dialogs, shared with the other parts
+
 	server *mariadb.Server
 	mu     sync.Mutex
 
@@ -85,11 +48,10 @@ type ui struct {
 	// where Fyne's test driver would run the check's result on another
 	// goroutine instead of the UI thread.
 	recheck func()
-	// later runs f on the UI thread after d. Tests replace it, for the
-	// same reason as recheck.
-	later func(d time.Duration, f func())
 
-	// MariaDB's card.
+	// MariaDB's card. The fields below point into it, so MariaDB's code
+	// reads as before.
+	card    *serviceCard
 	name    *widget.Label
 	version *widget.Label
 	detail  *widget.Label
@@ -107,36 +69,28 @@ type ui struct {
 	shutdown     *widget.Label
 	shutdownIcon *widget.Icon
 
-	entries []logEntry
-	logList *widget.List
-	copyLog *widget.Button
-
 	lastWhy string // last reported reason for an unclean shutdown, so it's logged once
+
+	parts    []*part         // the other parts: mail catcher, FTP server...
+	settings *setup.Settings // nil in tests that don't need it
+	sites    string          // the websites folder, shown in the status bar
+
 }
 
 func newUI(win fyne.Window, server *mariadb.Server) *ui {
 	u := &ui{
-		win:          win,
+		window:       newWindow(win),
 		server:       server,
 		port:         server.Port,
 		setUp:        true,
-		name:         widget.NewLabel("MariaDB"),
-		version:      muted(""),
-		detail:       muted(""),
-		status:       newPill(),
-		spinner:      widget.NewActivity(),
-		folder:       muted(server.DataDir),
+		folder:       muted("Websites folder not chosen yet"),
 		shutdown:     muted(""),
 		shutdownIcon: widget.NewIcon(good.icon()),
 	}
-	u.name.TextStyle.Bold = true
+	u.card = newServiceCard("MariaDB", theme.StorageIcon(), u.onAction, nil, u.showMoreMenu)
+	u.name, u.version, u.detail = u.card.name, u.card.version, u.card.detail
+	u.status, u.spinner, u.action, u.more = u.card.status, u.card.spinner, u.card.action, u.card.more
 	u.folder.Truncation = fyne.TextTruncateEllipsis
-	u.spinner.Hide()
-	u.action = widget.NewButtonWithIcon("Start", theme.MediaPlayIcon(), u.onAction)
-	u.more = widget.NewButtonWithIcon("", theme.MoreVerticalIcon(), u.showMoreMenu)
-	u.more.Importance = widget.LowImportance
-	u.copyLog = widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), u.copyActivity)
-	u.copyLog.Importance = widget.LowImportance
 
 	u.bannerText = widget.NewLabel("")
 	u.bannerText.Wrapping = fyne.TextWrapWord
@@ -150,33 +104,11 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 	u.shutdown.Hide()
 	u.shutdownIcon.Hide()
 
-	u.logList = widget.NewList(
-		func() int { return len(u.entries) },
-		func() fyne.CanvasObject {
-			when := widget.NewLabel("00:00:00")
-			when.Importance = widget.LowImportance
-			icon := widget.NewIcon(nil)
-			msg := widget.NewLabel("")
-			msg.Truncation = fyne.TextTruncateEllipsis
-			left := container.NewHBox(when, icon)
-			return container.New(layout.NewBorderLayout(nil, nil, left, nil), left, msg)
-		},
-		func(id widget.ListItemID, o fyne.CanvasObject) {
-			e := u.entries[id]
-			row := o.(*fyne.Container).Objects
-			left := row[0].(*fyne.Container).Objects
-			left[0].(*widget.Label).SetText(e.at.Format("15:04:05"))
-			left[1].(*widget.Icon).SetResource(e.lvl.icon())
-			row[1].(*widget.Label).SetText(e.msg)
-		})
-	u.logList.HideSeparators = true
-
 	// Progress comes from the goroutine running Start or Stop.
 	server.Progress = func(msg string) {
 		fyne.Do(func() { u.log(progressLevel(msg), msg) })
 	}
 	u.recheck = u.checkNow
-	u.later = func(d time.Duration, f func()) { time.AfterFunc(d, func() { fyne.Do(f) }) }
 	u.show(u.pidNow)
 	return u
 }
@@ -184,9 +116,12 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 // content lays out the window.
 func (u *ui) content() fyne.CanvasObject {
 	activityHead := container.NewBorder(nil, nil, container.NewCenter(sectionTitle("Activity")), u.copyLog)
+	cards := []fyne.CanvasObject{u.mariadbCard(), u.banner}
+	for _, p := range u.parts {
+		cards = append(cards, p.object())
+	}
 	top := vstack(10,
-		vstack(0, sectionTitle("Services"), u.mariadbCard()),
-		u.banner,
+		vstack(0, sectionTitle("Services"), vstack(8, cards...)),
 		activityHead,
 	)
 	logPanel := newCard(container.NewThemeOverride(u.logList, compactTheme{fyne.CurrentApp().Settings().Theme()}), 4)
@@ -220,18 +155,10 @@ func (u *ui) header() fyne.CanvasObject {
 	return vstack(0, newBar(row, fyne.NewSize(16, 10)), widget.NewSeparator())
 }
 
-func (u *ui) mariadbCard() fyne.CanvasObject {
-	words := vstack(-14, hstack(-10, u.name, u.version), u.detail)
-	right := hstack(8,
-		container.NewCenter(u.spinner),
-		container.NewCenter(u.status),
-		container.NewCenter(u.action),
-		container.NewCenter(u.more))
-	return newCard(container.NewBorder(nil, nil, newTile(theme.StorageIcon()), right, words), 12)
-}
+func (u *ui) mariadbCard() fyne.CanvasObject { return u.card.object() }
 
 func (u *ui) statusBar() fyne.CanvasObject {
-	open := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), u.openDataFolder)
+	open := widget.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), u.openSites)
 	open.Importance = widget.LowImportance
 	right := container.NewHBox(
 		container.NewCenter(u.shutdownIcon), u.shutdown, container.NewCenter(open))
@@ -598,37 +525,6 @@ func (u *ui) watch(interval time.Duration) {
 	}()
 }
 
-// log adds a timestamped line to the activity log.
-func (u *ui) log(lvl level, msg string) {
-	u.entries = append(u.entries, logEntry{at: time.Now(), lvl: lvl, msg: msg})
-	if n := len(u.entries); n > maxLogLines+logTrim {
-		u.entries = append(u.entries[:0:0], u.entries[n-maxLogLines:]...)
-	}
-	u.logList.Refresh()
-	u.logList.ScrollToBottom()
-}
-
-// logLines returns the activity log as plain text lines.
-func (u *ui) logLines() []string {
-	lines := make([]string, len(u.entries))
-	for i, e := range u.entries {
-		lines[i] = e.String()
-	}
-	return lines
-}
-
-// copyActivity puts the activity log on the clipboard, for pasting into a
-// message when asking for help.
-func (u *ui) copyActivity() {
-	fyne.CurrentApp().Clipboard().SetContent(strings.Join(u.logLines(), "\n"))
-	u.copyLog.SetText("Copied")
-	u.copyLog.SetIcon(theme.ConfirmIcon())
-	u.later(2*time.Second, func() {
-		u.copyLog.SetText("Copy")
-		u.copyLog.SetIcon(theme.ContentCopyIcon())
-	})
-}
-
 // openDataFolder shows the data folder in Finder, Explorer or the file
 // manager.
 func (u *ui) openDataFolder() {
@@ -676,4 +572,25 @@ func repairPrompt(rec *mariadb.Recovery) string {
 		fmt.Fprintf(&b, "\nA copy of the data from before recovery is in:\n%s", rec.Snapshot)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// setSites shows the websites folder in the status bar.
+func (u *ui) setSites(dir string) {
+	u.sites = dir
+	u.folder.SetText("Websites: " + dir)
+}
+
+// openSites shows the websites folder in Finder, Explorer or the file
+// manager.
+func (u *ui) openSites() {
+	if u.sites == "" {
+		return
+	}
+	link, err := url.Parse(storage.NewFileURI(u.sites).String())
+	if err == nil {
+		err = fyne.CurrentApp().OpenURL(link)
+	}
+	if err != nil {
+		u.log(bad, "Couldn't open the websites folder: "+err.Error())
+	}
 }

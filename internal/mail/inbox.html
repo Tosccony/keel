@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail catcher · Keel</title>
+<style>
+  :root {
+    --bg: #f3f5f8; --bar: #ffffff; --card: #ffffff; --line: #e0e4ea;
+    --text: #161b22; --muted: #6b7480; --primary: #0f766e; --primary-fg: #ffffff;
+    --hover: rgba(0,0,0,.04); --selected: rgba(15,118,110,.10); --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --bar: #14181e; --card: #171c23; --line: #252c35;
+      --text: #e6eaf0; --muted: #8c96a4; --primary: #2dd4bf; --primary-fg: #042f2b;
+      --hover: rgba(255,255,255,.05); --selected: rgba(45,212,191,.14); --danger: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; }
+  header { background: var(--bar); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .note { color: var(--muted); font-size: 12px; flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text); padding: 5px 12px; border-radius: 6px; cursor: pointer; }
+  button:hover { background: var(--hover); }
+  button.danger { color: var(--danger); }
+  main { flex: 1; display: grid; grid-template-columns: minmax(260px, 34%) 1fr; min-height: 0; }
+  #list { border-right: 1px solid var(--line); overflow-y: auto; background: var(--card); }
+  .item { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:hover { background: var(--hover); }
+  .item.selected { background: var(--selected); }
+  .item .top { display: flex; justify-content: space-between; gap: 8px; }
+  .item .from { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .item .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .to { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .empty { margin: auto; color: var(--muted); text-align: center; padding: 24px; max-width: 420px; }
+  .empty code { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  .meta { padding: 14px 18px 8px; border-bottom: 1px solid var(--line); background: var(--card); }
+  .meta h2 { margin: 0 0 6px; font-size: 18px; word-break: break-word; }
+  .meta table { border-collapse: collapse; font-size: 13px; }
+  .meta td { padding: 1px 10px 1px 0; vertical-align: top; word-break: break-word; }
+  .meta td:first-child { color: var(--muted); white-space: nowrap; }
+  .tabs { display: flex; gap: 4px; padding: 8px 18px 0; align-items: center; }
+  .tabs button { border-radius: 6px 6px 0 0; border-bottom: none; }
+  .tabs button.on { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+  .tabs .spacer { flex: 1; }
+  .body { flex: 1; min-height: 0; border-top: 1px solid var(--line); background: var(--card); }
+  .body iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+  .body pre { margin: 0; padding: 14px 18px; white-space: pre-wrap; word-break: break-word; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; height: 100%; overflow: auto; }
+  .attachments { padding: 8px 18px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+  .attachments a { color: var(--primary); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+  @media (max-width: 700px) { main { grid-template-columns: 1fr; } #list { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Mail catcher</h1>
+  <span class="note">Every email your PHP code sends lands here. Nothing leaves this computer.</span>
+  <button class="danger" id="clear">Delete all</button>
+</header>
+<main>
+  <div id="list"></div>
+  <div id="view"><div class="empty">No email yet.<br><br>Send one from PHP with <code>mail()</code>, or point PHPMailer at <code>localhost</code>, port <code id="port"></code>, with no encryption.</div></div>
+</main>
+<script>
+"use strict";
+const list = document.getElementById("list"), view = document.getElementById("view");
+let selected = null, shownIDs = "";
+fetch("/api/info").then(r => r.json()).then(i => { document.getElementById("port").textContent = i.smtpPort; }).catch(() => {});
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const when = iso => {
+  const d = new Date(iso), now = new Date();
+  return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : d.toLocaleDateString();
+};
+const size = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB";
+
+async function refresh() {
+  let msgs;
+  try { msgs = await (await fetch("/api/messages")).json(); } catch { return; }
+  const ids = msgs.map(m => m.id).join();
+  if (ids === shownIDs) return;
+  shownIDs = ids;
+  list.innerHTML = msgs.map(m => `
+    <div class="item${m.id === selected ? " selected" : ""}" data-id="${esc(m.id)}">
+      <div class="top"><span class="from">${esc(m.from || "(no sender)")}</span><span class="when">${esc(when(m.date))}</span></div>
+      <div class="subject">${esc(m.subject || "(no subject)")}</div>
+      <div class="to">To: ${esc((m.to || []).join(", "))}</div>
+    </div>`).join("");
+  if (selected && !msgs.some(m => m.id === selected)) { selected = null; showEmpty(); }
+}
+
+function showEmpty() {
+  view.innerHTML = '<div class="empty">Pick an email on the left.</div>';
+}
+
+list.addEventListener("click", e => {
+  const item = e.target.closest(".item");
+  if (!item) return;
+  selected = item.dataset.id;
+  list.querySelectorAll(".item").forEach(i => i.classList.toggle("selected", i === item));
+  open(selected);
+});
+
+async function open(id) {
+  const m = await (await fetch("/api/messages/" + encodeURIComponent(id))).json();
+  if (m.error) { showEmpty(); return; }
+  const rows = [["From", m.from], ["To", (m.to || []).join(", ")]];
+  if (m.cc) rows.push(["Cc", m.cc.join(", ")]);
+  if (m.bcc) rows.push(["Bcc", m.bcc.join(", ")]);
+  rows.push(["Date", new Date(m.date).toLocaleString()]);
+  const tabs = [];
+  if (m.hasHtml) tabs.push(["html", "HTML"]);
+  tabs.push(["text", "Text"], ["headers", "Headers"], ["raw", "Raw"]);
+  view.innerHTML = `
+    <div class="meta"><h2>${esc(m.subject || "(no subject)")}</h2>
+      <table>${rows.map(r => `<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table></div>
+    ${m.attachments.length ? `<div class="attachments">${m.attachments.map(a =>
+      `<a href="/api/messages/${encodeURIComponent(id)}/attachments/${a.index}">${esc(a.name)} · ${size(a.size)}</a>`).join("")}</div>` : ""}
+    <div class="tabs">${tabs.map(t => `<button data-tab="${t[0]}">${t[1]}</button>`).join("")}
+      <span class="spacer"></span><button class="danger" id="delete">Delete</button></div>
+    <div class="body" id="body"></div>`;
+  const body = document.getElementById("body");
+  const show = async tab => {
+    view.querySelectorAll(".tabs button[data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+    if (tab === "html") body.innerHTML = `<iframe sandbox src="/api/messages/${encodeURIComponent(id)}/html"></iframe>`;
+    else if (tab === "text") body.innerHTML = `<pre>${esc(m.text || "(this email has no plain-text version)")}</pre>`;
+    else if (tab === "headers") body.innerHTML = `<pre>${esc(m.headers.map(h => h.name + ": " + h.value).join("\n"))}</pre>`;
+    else body.innerHTML = `<pre>${esc(await (await fetch("/api/messages/" + encodeURIComponent(id) + "/raw")).text())}</pre>`;
+  };
+  view.querySelectorAll(".tabs button[data-tab]").forEach(b => b.addEventListener("click", () => show(b.dataset.tab)));
+  document.getElementById("delete").addEventListener("click", async () => {
+    await fetch("/api/messages/" + encodeURIComponent(id), {method: "DELETE"});
+    selected = null; showEmpty(); shownIDs = ""; refresh();
+  });
+  show(tabs[0][0]);
+}
+
+document.getElementById("clear").addEventListener("click", async () => {
+  if (!confirm("Delete every email in the mail catcher?")) return;
+  await fetch("/api/messages", {method: "DELETE"});
+  selected = null; showEmpty(); shownIDs = ""; refresh();
+});
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

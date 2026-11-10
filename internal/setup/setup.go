@@ -29,10 +29,11 @@ const (
 	LabPort     = 3307 // leaves 3306 for another MariaDB on a developer's machine
 )
 
-// Options says which MariaDB to run and where its files live.
+// Options says which MariaDB to run and where Keel's files live.
 type Options struct {
+	Home   string // Keel's folder: settings, and a folder per part
 	BinDir string // folder that holds mariadbd
-	Folder string // holds data/, backups/, the socket and the log
+	Folder string // MariaDB's folder: data/, backups/, the socket and the log
 	Port   int    // preferred port; a port saved by ChoosePort wins unless PortSet
 
 	// PortSet means the port was asked for explicitly (-port), so it
@@ -47,9 +48,11 @@ type Options struct {
 // MariaDB, and the lab otherwise.
 func Defaults() Options {
 	if bin := Bundled(); bin != "" {
+		home := filepath.Join(appDataDir(), appFolderName())
 		return Options{
+			Home:    home,
 			BinDir:  bin,
-			Folder:  filepath.Join(appDataDir(), appFolderName(), "mariadb"),
+			Folder:  filepath.Join(home, "mariadb"),
 			Port:    DefaultPort,
 			Bundled: true,
 		}
@@ -60,9 +63,11 @@ func Defaults() Options {
 // Lab returns the development setup.
 func Lab() Options {
 	home, _ := os.UserHomeDir()
+	lab := filepath.Join(home, "personal", "keel-lab")
 	return Options{
+		Home:   lab,
 		BinDir: labBinDir(),
-		Folder: filepath.Join(home, "personal", "keel-lab"),
+		Folder: lab, // MariaDB's files sit at the top of the lab folder
 		Port:   LabPort,
 	}
 }
@@ -70,7 +75,10 @@ func Lab() Options {
 // AddFlags lets -bin, -lab and -port override the defaults.
 func (o *Options) AddFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.BinDir, "bin", o.BinDir, "folder that holds mariadbd")
-	fs.StringVar(&o.Folder, "lab", o.Folder, "folder for MariaDB's files (holds data/, backups/, the socket and the log)")
+	fs.Func("lab", fmt.Sprintf("folder for Keel's files, MariaDB's at the top (default %s)", o.Folder), func(v string) error {
+		o.Home, o.Folder = v, v
+		return nil
+	})
 	fs.Func("port", fmt.Sprintf("MariaDB port (default %d, or the port Keel last moved it to)", o.Port), func(v string) error {
 		p, err := strconv.Atoi(v)
 		if err != nil || p < 1 || p > 65535 {
@@ -84,8 +92,8 @@ func (o *Options) AddFlags(fs *flag.FlagSet) {
 // Server returns the MariaDB server these options describe.
 func (o Options) Server() *mariadb.Server {
 	port := o.Port
-	if st, err := loadSettings(o.settingsFile()); err == nil && st.MariaDBPort != 0 && !o.PortSet {
-		port = st.MariaDBPort
+	if !o.PortSet {
+		port = o.Settings().Port(PartMariaDB, o.Port)
 	}
 	return &mariadb.Server{
 		BinDir:  o.BinDir,
@@ -94,6 +102,15 @@ func (o Options) Server() *mariadb.Server {
 		Socket:  filepath.Join(o.Folder, "mysql.sock"),
 		LogFile: filepath.Join(o.Folder, "mariadb.log"),
 	}
+}
+
+// home is Keel's folder. Options made without one keep everything in the
+// MariaDB folder, like the lab.
+func (o Options) home() string {
+	if o.Home != "" {
+		return o.Home
+	}
+	return o.Folder
 }
 
 // Prepare gets MariaDB ready to start: it creates the data folder on the
@@ -157,6 +174,17 @@ func appDataDir() string {
 		}
 		return filepath.Join(home, ".local", "share")
 	}
+}
+
+// DefaultSites is where the websites folder (XAMPP's htdocs) goes unless
+// the user picks another: Documents/Keel/htdocs, the same on every system.
+func DefaultSites() string {
+	return filepath.Join(documentsDir(), "Keel", "htdocs")
+}
+
+func homeDocuments() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Documents")
 }
 
 // appFolderName follows each system's convention: "keel" on Linux, "Keel"

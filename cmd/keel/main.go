@@ -36,8 +36,11 @@ func main() {
 	server := opts.Server()
 	u := newUI(w, server)
 	u.prepare = opts.Prepare
+	settings := opts.Settings()
+	u.settings = settings
+	u.parts = append(u.parts, newPart(u.window, newMailService(opts), settings))
 	w.SetContent(u.content())
-	w.Resize(fyne.NewSize(780, 540))
+	w.Resize(fyne.NewSize(820, 720))
 
 	u.log(info, "Watching the MariaDB in "+server.DataDir+".")
 	go func() {
@@ -52,6 +55,23 @@ func main() {
 	}()
 	u.checkNow()
 	u.watch(2 * time.Second)
+
+	// First run: ask where websites live. Then start the parts that are set
+	// to start with Keel.
+	autostart := func() {
+		if settings.Autostart(setup.PartMariaDB) {
+			u.start(false)
+		}
+		for _, p := range u.parts {
+			p.autostart()
+		}
+	}
+	if dir := settings.Sites(); dir != "" {
+		u.setSites(dir)
+		autostart()
+	} else {
+		fyne.Do(func() { u.askSites(settings, setup.DefaultSites(), autostart) })
+	}
 
 	w.ShowAndRun()
 }

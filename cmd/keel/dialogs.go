@@ -41,15 +41,15 @@ func message(text string) fyne.CanvasObject {
 }
 
 // inform shows a message with an OK button.
-func (u *ui) inform(title, text string) {
-	dialog.NewCustom(title, "OK", message(text), u.win).Show()
+func (w *window) inform(title, text string) {
+	dialog.NewCustom(title, "OK", message(text), w.win).Show()
 }
 
 // ask shows a question with two buttons and reports which was pressed.
 // importance colours the first button: High for the normal choice, Danger
 // for one that risks data.
-func (u *ui) ask(title, text, yes, no string, importance widget.Importance, answer func(ok bool)) {
-	d := dialog.NewCustomConfirm(title, yes, no, message(text), answer, u.win)
+func (w *window) ask(title, text, yes, no string, importance widget.Importance, answer func(ok bool)) {
+	d := dialog.NewCustomConfirm(title, yes, no, message(text), answer, w.win)
 	d.SetConfirmImportance(importance)
 	d.Show()
 }
