@@ -110,6 +110,7 @@ func (w *webService) Start(ctx context.Context) (string, error) {
 	s.MailPort, s.MailInbox = mailPort, fmt.Sprintf("http://localhost:%d/", mailWeb)
 	s.Sendmail = sendmailCommand(mailPort)
 	s.Timezone = setup.Timezone()
+	s.PHPMyAdmin = w.opts.PHPMyAdmin()
 	if wrote, err := web.WriteWelcome(sites); err == nil && wrote {
 		notes = joinNotes(notes, "The websites folder was empty, so Keel put a welcome page in it (index.php).")
 	}
@@ -137,7 +138,16 @@ func (w *webService) Menu() []*fyne.MenuItem {
 		it.Icon = icon
 		return it
 	}
+	pma := fyne.NewMenuItem("phpMyAdmin", func() {
+		if link, err := url.Parse(fmt.Sprintf("http://localhost:%d/phpmyadmin/", w.server.Port)); err == nil {
+			fyne.CurrentApp().OpenURL(link)
+		}
+	})
+	pma.Icon = theme.StorageIcon()
+	pma.Disabled = w.opts.PHPMyAdmin() == ""
 	return []*fyne.MenuItem{
+		pma,
+		fyne.NewMenuItemSeparator(),
 		item("Apache settings", theme.SettingsIcon(), w.server.CustomConf(), true),
 		item("PHP settings", theme.SettingsIcon(), w.server.CustomIni(), true),
 		fyne.NewMenuItemSeparator(),

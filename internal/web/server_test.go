@@ -215,3 +215,38 @@ func TestGeneratedConfigPassesApachesCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestPHPMyAdminConfig(t *testing.T) {
+	s := &Server{Folder: filepath.Join(t.TempDir(), "O'Brien's web"), MariaDBPort: 3310, PHPMyAdmin: "/pma"}
+	os.MkdirAll(s.conf(), 0o755)
+	if err := s.writePMAConfig(); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(s.conf(), "phpmyadmin.inc.php"))
+	conf := string(b)
+	if !strings.Contains(conf, "['port'] = '3310'") || !strings.Contains(conf, `O\'Brien\'s web`) {
+		t.Errorf("config:\n%s", conf)
+	}
+	if php, err := exec.LookPath("php"); err == nil {
+		if out, err := exec.Command(php, "-l", filepath.Join(s.conf(), "phpmyadmin.inc.php")).CombinedOutput(); err != nil {
+			t.Errorf("the config isn't valid PHP: %s", out)
+		}
+	}
+	secret, _ := os.ReadFile(filepath.Join(s.conf(), "phpmyadmin-secret.txt"))
+	s.writePMAConfig()
+	again, _ := os.ReadFile(filepath.Join(s.conf(), "phpmyadmin-secret.txt"))
+	if len(secret) != 64 || string(secret) != string(again) {
+		t.Errorf("the cookie secret should be made once and kept: %q then %q", secret, again)
+	}
+	if _, err := os.Stat(s.PMACustom()); err != nil {
+		t.Errorf("the user's phpMyAdmin file wasn't created: %v", err)
+	}
+}
+
+func TestPHPString(t *testing.T) {
+	for in, want := range map[string]string{`C:\xampp`: `'C:\\xampp'`, "it's": `'it\'s'`, "plain": "'plain'"} {
+		if got := phpString(in); got != want {
+			t.Errorf("phpString(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

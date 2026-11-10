@@ -26,6 +26,26 @@ func (o Options) WebRuntime() (web.Runtime, error) {
 	return labWeb()
 }
 
+// PHPMyAdmin returns phpMyAdmin's folder: the one bundled with Keel, or in
+// a development build, phpmyadmin/ in Keel's folder (scripts/fetch-phpmyadmin.sh
+// puts it there). It's "" when there's none.
+func (o Options) PHPMyAdmin() string {
+	if dir := exeDir(); dir != "" {
+		if pma := bundledDir(dir, "phpmyadmin"); pma != "" {
+			return pma
+		}
+	}
+	if pma := filepath.Join(o.home(), "phpmyadmin"); fileExists(filepath.Join(pma, "index.php")) {
+		return pma
+	}
+	return ""
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // WebFolder is where Keel keeps Apache's and PHP's generated config, logs
 // and temporary files.
 func (o Options) WebFolder() string { return filepath.Join(o.home(), "web") }

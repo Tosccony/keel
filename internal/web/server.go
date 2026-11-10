@@ -68,6 +68,9 @@ func (s *Server) sessions() string { return filepath.Join(s.Folder, "tmp", "sess
 func (s *Server) ErrorLog() string    { return filepath.Join(s.logs(), "apache-error.log") }
 func (s *Server) PHPErrorLog() string { return filepath.Join(s.logs(), "php-errors.log") }
 
+// PMACustom is phpMyAdmin's settings file the user owns.
+func (s *Server) PMACustom() string { return filepath.Join(s.conf(), "phpmyadmin-custom.inc.php") }
+
 // CustomConf and CustomIni are the files the user owns.
 func (s *Server) CustomConf() string { return filepath.Join(s.conf(), "custom.conf") }
 func (s *Server) CustomIni() string  { return filepath.Join(s.conf(), "php.d", "custom.ini") }

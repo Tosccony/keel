@@ -2,8 +2,12 @@ package web
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 )
 
@@ -78,6 +82,11 @@ Alias /phpmyadmin "{{.PHPMyAdmin}}"
     Options FollowSymLinks
     AllowOverride None
     Require local
+    # Keel's phpMyAdmin reads its config and writes its temporary files
+    # here, not in its own folder (see scripts/fetch-phpmyadmin.sh).
+    SetEnv KEEL_PMA_CONFIG "{{.Conf}}/phpmyadmin.inc.php"
+    SetEnv KEEL_PMA_TEMP "{{.Tmp}}/phpmyadmin/"
+    SetEnv KEEL_PMA_CACHE "{{.Tmp}}/phpmyadmin/cache/"
 </Directory>
 {{end}}
 Include "{{.Conf}}/custom.conf"
@@ -163,6 +172,47 @@ catch_workers_output = yes
 clear_env = no
 `))
 
+var pmaConf = template.Must(template.New("phpmyadmin.inc.php").Funcs(template.FuncMap{"php": phpString}).Parse(`<?php
+// Written by Keel each time the web server starts: changes here are lost.
+// Put your own phpMyAdmin settings in phpmyadmin-custom.inc.php, next to
+// this file.
+
+$cfg['blowfish_secret'] = hex2bin({{php .Secret}});
+
+$i = 1;
+$cfg['Servers'][$i]['host'] = '127.0.0.1';
+$cfg['Servers'][$i]['port'] = {{php .MariaDBPort}};
+// Like XAMPP: in as root, with no password, without a login page.
+$cfg['Servers'][$i]['auth_type'] = 'config';
+$cfg['Servers'][$i]['user'] = 'root';
+$cfg['Servers'][$i]['password'] = '';
+$cfg['Servers'][$i]['AllowNoPassword'] = true;
+
+$cfg['TempDir'] = {{php .Temp}};
+$cfg['VersionCheck'] = false; // Keel ships the updates
+$cfg['SendErrorReports'] = 'never';
+$cfg['PmaNoRelation_DisableWarning'] = true;
+
+$custom = __DIR__ . '/phpmyadmin-custom.inc.php';
+if (is_file($custom)) {
+    require $custom;
+}
+`))
+
+const pmaCustom = `<?php
+// Your own phpMyAdmin settings. Keel never changes this file. It's read
+// after Keel's settings, so what you set here wins.
+//
+// If you give MariaDB's root user a password, have phpMyAdmin ask for it:
+//   $cfg['Servers'][1]['auth_type'] = 'cookie';
+`
+
+// phpString quotes a value as a PHP single-quoted string.
+func phpString(v any) string {
+	s := strings.ReplaceAll(fmt.Sprint(v), `\`, `\\`)
+	return "'" + strings.ReplaceAll(s, "'", `\'`) + "'"
+}
+
 // windowsExtensions are the PHP extensions Keel turns on with php.net's
 // Windows build, which ships them as separate DLLs: what XAMPP enables,
 // and what Laravel, WordPress and phpMyAdmin need.
@@ -200,6 +250,11 @@ func (s *Server) writeConfig() error {
 			return err
 		}
 	}
+	if s.PHPMyAdmin != "" {
+		if err := s.writePMAConfig(); err != nil {
+			return err
+		}
+	}
 	for name, body := range map[string]string{"custom.conf": customConf, filepath.Join("php.d", "custom.ini"): customIni} {
 		p := filepath.Join(s.conf(), name)
 		if _, err := os.Stat(p); os.IsNotExist(err) {
@@ -207,6 +262,40 @@ func (s *Server) writeConfig() error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// writePMAConfig writes phpMyAdmin's config, its temp folders, the user's
+// file if missing, and a secret for signing phpMyAdmin's cookies, made
+// once and kept.
+func (s *Server) writePMAConfig() error {
+	temp := filepath.Join(s.tmp(), "phpmyadmin")
+	if err := os.MkdirAll(filepath.Join(temp, "cache"), 0o755); err != nil {
+		return err
+	}
+	secretFile := filepath.Join(s.conf(), "phpmyadmin-secret.txt")
+	secret, err := os.ReadFile(secretFile)
+	if err != nil || len(strings.TrimSpace(string(secret))) != 64 {
+		b := make([]byte, 32)
+		rand.Read(b)
+		secret = []byte(hex.EncodeToString(b))
+		if err := os.WriteFile(secretFile, secret, 0o600); err != nil {
+			return err
+		}
+	}
+	var b bytes.Buffer
+	if err := pmaConf.Execute(&b, map[string]any{
+		"Secret": strings.TrimSpace(string(secret)), "MariaDBPort": s.MariaDBPort,
+		"Temp": filepath.ToSlash(temp) + "/",
+	}); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(s.conf(), "phpmyadmin.inc.php"), b.Bytes(), 0o644); err != nil {
+		return err
+	}
+	if _, err := os.Stat(s.PMACustom()); os.IsNotExist(err) {
+		return os.WriteFile(s.PMACustom(), []byte(pmaCustom), 0o644)
 	}
 	return nil
 }

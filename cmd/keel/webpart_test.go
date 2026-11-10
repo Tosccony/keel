@@ -94,3 +94,68 @@ func httpGet(t *testing.T, url string) (int, string) {
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }
+
+// phpMyAdmin with a real MariaDB: logged in as root without a password,
+// on MariaDB's current port. Needs the development setup and phpMyAdmin
+// in dist/ (scripts/fetch-phpmyadmin.sh).
+func TestPHPMyAdminReachesMariaDB(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the development web server is set up for macOS")
+	}
+	pma, _ := filepath.Abs(filepath.Join("..", "..", "dist", "phpmyadmin"))
+	if _, err := os.Stat(filepath.Join(pma, "index.php")); err != nil {
+		t.Skip("run scripts/fetch-phpmyadmin.sh first")
+	}
+	bin := setup.Lab().BinDir
+	if _, err := os.Stat(filepath.Join(bin, "mariadb-install-db")); err != nil {
+		t.Skip("needs MariaDB installed")
+	}
+	home, err := os.MkdirTemp("", "keel-pma-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	os.Symlink(pma, filepath.Join(home, "phpmyadmin"))
+	opts := setup.Options{Home: home, BinDir: bin, Folder: filepath.Join(home, "mariadb"), Port: freeTCPPort(t)}
+	st := opts.Settings()
+	sites := filepath.Join(home, "htdocs")
+	os.MkdirAll(sites, 0o755)
+	st.SetSites(sites)
+	st.SetPort(setup.PartWeb, freeTCPPort(t))
+	st.SetPort(setup.PartPHP, freeTCPPort(t))
+
+	ctx := context.Background()
+	db := opts.Server()
+	if _, err := opts.Prepare(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Stop(ctx) })
+
+	webSvc := newWebService(opts)
+	if webSvc.server == nil {
+		t.Skip("no development web server: ", webSvc.err)
+	}
+	if _, err := webSvc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { webSvc.Stop(ctx) })
+
+	code, body := httpGet(t, "http://127.0.0.1:"+strconv.Itoa(webSvc.server.Port)+"/phpmyadmin/")
+	if code != 200 || !strings.Contains(body, "phpMyAdmin") {
+		t.Fatalf("phpMyAdmin: %d\n%.600s", code, body)
+	}
+	for _, bad := range []string{"Access denied", "Cannot log in", "mysqli::real_connect"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("phpMyAdmin couldn't log in (%q):\n%.800s", bad, body)
+		}
+	}
+	if !strings.Contains(body, "MariaDB") {
+		t.Errorf("phpMyAdmin's home page should name the MariaDB server:\n%.800s", body)
+	}
+	if strings.Contains(body, "Deprecated:") {
+		t.Logf("PHP %s shows deprecation notices in phpMyAdmin (production ships PHP 8.4)", webSvc.php)
+	}
+}
