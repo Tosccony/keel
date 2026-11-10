@@ -352,3 +352,45 @@ func TestUnreadableDirIsAnError(t *testing.T) {
 }
 
 var _ = io.Discard
+
+// What PHP's mail() does on macOS and Linux: run sendmail -t -i with the
+// message on its input.
+func TestSendmailStandIn(t *testing.T) {
+	c := startCatcher(t)
+	msg := "From: Shop <shop@example.test>\nTo: student@example.test\nCc: ta@example.test\nBcc: teacher@example.test,\n  principal@example.test\nSubject: Receipt\n\nThanks!\n"
+	if err := Sendmail(strings.NewReader(msg), []string{"-t", "-i"}, c.SMTPPort); err != nil {
+		t.Fatal(err)
+	}
+	m := only(t, c)
+	if m.Subject != "Receipt" || !strings.Contains(m.Text, "Thanks!") {
+		t.Errorf("message: %+v", m.Summary)
+	}
+	raw, _ := c.Raw(m.ID)
+	if strings.Contains(string(raw), "Bcc:") || strings.Contains(string(raw), "principal@example.test\r\nSubject") {
+		t.Errorf("the Bcc header should be removed:\n%s", raw)
+	}
+	if len(m.Bcc) != 2 || m.Bcc[0] != "teacher@example.test" || m.Bcc[1] != "principal@example.test" {
+		t.Errorf("Bcc from the envelope: %v", m.Bcc)
+	}
+	if !strings.Contains(string(raw), "X-Keel-Envelope-From: <shop@example.test>") {
+		t.Errorf("sender should come from the From header:\n%.300s", raw)
+	}
+
+	// Recipients on the command line, and -f.
+	c.DeleteAll()
+	if err := Sendmail(strings.NewReader("Subject: hi\n\nyo\n"), []string{"-i", "-fapp@example.test", "a@example.test"}, c.SMTPPort); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = c.Raw(only(t, c).ID)
+	if !strings.Contains(string(raw), "X-Keel-Envelope-From: <app@example.test>") || !strings.Contains(string(raw), "X-Keel-Envelope-To: a@example.test") {
+		t.Errorf("envelope:\n%.300s", raw)
+	}
+
+	if err := Sendmail(strings.NewReader("Subject: nobody\n\nx\n"), []string{"-i"}, c.SMTPPort); err == nil {
+		t.Error("a message with no recipients was sent")
+	}
+	c.Stop(context.Background())
+	if err := Sendmail(strings.NewReader("To: a@example.test\n\nx\n"), []string{"-t"}, c.SMTPPort); err == nil || !strings.Contains(err.Error(), "is it running in Keel?") {
+		t.Errorf("with the catcher stopped: %v", err)
+	}
+}

@@ -89,16 +89,21 @@ func (o *Options) AddFlags(fs *flag.FlagSet) {
 	})
 }
 
+// MariaDBPort is the port MariaDB uses: -port if given, else the one Keel
+// last moved it to, else the default.
+func (o Options) MariaDBPort() int {
+	if o.PortSet {
+		return o.Port
+	}
+	return o.Settings().Port(PartMariaDB, o.Port)
+}
+
 // Server returns the MariaDB server these options describe.
 func (o Options) Server() *mariadb.Server {
-	port := o.Port
-	if !o.PortSet {
-		port = o.Settings().Port(PartMariaDB, o.Port)
-	}
 	return &mariadb.Server{
 		BinDir:  o.BinDir,
 		DataDir: filepath.Join(o.Folder, "data"),
-		Port:    port,
+		Port:    o.MariaDBPort(),
 		Socket:  filepath.Join(o.Folder, "mysql.sock"),
 		LogFile: filepath.Join(o.Folder, "mariadb.log"),
 	}

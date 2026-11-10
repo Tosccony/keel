@@ -8,11 +8,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
+	"github.com/Tosccony/keel/internal/mail"
 	"github.com/Tosccony/keel/internal/setup"
 )
 
@@ -20,6 +23,10 @@ import (
 var version = "dev"
 
 func main() {
+	// PHP runs this program as its sendmail on macOS and Linux.
+	if len(os.Args) > 1 && os.Args[1] == "--sendmail" {
+		os.Exit(runSendmail(os.Args[2:]))
+	}
 	opts := setup.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -38,7 +45,9 @@ func main() {
 	u.prepare = opts.Prepare
 	settings := opts.Settings()
 	u.settings = settings
+	u.web = newPart(u.window, newWebService(opts), settings)
 	u.parts = append(u.parts,
+		u.web,
 		newPart(u.window, newMailService(opts), settings),
 		newPart(u.window, newFTPService(opts), settings))
 	w.SetContent(u.content())
@@ -76,4 +85,23 @@ func main() {
 	}
 
 	w.ShowAndRun()
+}
+
+// runSendmail hands a message from PHP to the mail catcher. The web server
+// passes the catcher's port first ("--port 1025"); without it, the port
+// comes from Keel's settings.
+func runSendmail(args []string) int {
+	port := 0
+	if len(args) >= 2 && args[0] == "--port" {
+		port, _ = strconv.Atoi(args[1])
+		args = args[2:]
+	}
+	if port == 0 {
+		port = setup.Defaults().Settings().Port(setup.PartMail, setup.DefaultPorts[setup.PartMail])
+	}
+	if err := mail.Sendmail(os.Stdin, args, port); err != nil {
+		fmt.Fprintln(os.Stderr, "keel sendmail:", err)
+		return 1
+	}
+	return 0
 }

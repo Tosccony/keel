@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/Tosccony/keel/internal/setup"
@@ -152,6 +153,11 @@ func (p *part) menu() *fyne.Menu {
 	if len(items) > 0 {
 		items = append(items, fyne.NewMenuItemSeparator())
 	}
+	if p.running {
+		restart := fyne.NewMenuItem("Restart", p.restart)
+		restart.Icon = theme.ViewRefreshIcon()
+		items = append(items, restart)
+	}
 	items = append(items, auto)
 	if p.busy {
 		for _, it := range items {
@@ -164,6 +170,52 @@ func (p *part) menu() *fyne.Menu {
 func (p *part) showMenu() {
 	widget.ShowPopUpMenuAtRelativePosition(p.menu(), p.win.Canvas(),
 		fyne.NewPos(0, p.card.more.Size().Height), p.card.more)
+}
+
+// restart stops the part and starts it again, to pick up changed
+// settings.
+func (p *part) restart() {
+	p.busy = true
+	p.card.showBusy("Restarting…")
+	go func() {
+		stopped := p.runStop()
+		if stopped.err != nil {
+			fyne.Do(func() { p.finishStop(stopped) })
+			return
+		}
+		r := p.runStart()
+		fyne.Do(func() { p.finishStart(r) })
+	}()
+}
+
+// checkNow looks, in the background, whether the part stopped or started
+// outside Keel (a crash, or Apache left running by an earlier Keel), and
+// updates the card.
+func (p *part) checkNow() {
+	if p.busy {
+		return
+	}
+	go func() {
+		if !p.mu.TryLock() {
+			return // a start or stop is running
+		}
+		running := p.svc.Running()
+		p.mu.Unlock()
+		fyne.Do(func() { p.applyCheck(running) })
+	}()
+}
+
+func (p *part) applyCheck(running bool) {
+	if p.busy || running == p.running {
+		return
+	}
+	p.running = running
+	p.show()
+	if running {
+		p.log(info, p.svc.Name()+" is running, started outside this window.")
+	} else {
+		p.log(warn, p.svc.Name()+" stopped without Keel asking.")
+	}
 }
 
 // autostart starts the part if it's set to start when Keel opens.

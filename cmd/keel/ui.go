@@ -71,7 +71,8 @@ type ui struct {
 
 	lastWhy string // last reported reason for an unclean shutdown, so it's logged once
 
-	parts    []*part         // the other parts: mail catcher, FTP server...
+	parts    []*part         // the other parts: web server, mail catcher, FTP server...
+	web      *part           // the web server, shown above MariaDB
 	settings *setup.Settings // nil in tests that don't need it
 	sites    string          // the websites folder, shown in the status bar
 
@@ -116,9 +117,15 @@ func newUI(win fyne.Window, server *mariadb.Server) *ui {
 // content lays out the window.
 func (u *ui) content() fyne.CanvasObject {
 	activityHead := container.NewBorder(nil, nil, container.NewCenter(sectionTitle("Activity")), u.copyLog)
-	cards := []fyne.CanvasObject{u.mariadbCard(), u.banner}
+	var cards []fyne.CanvasObject
+	if u.web != nil {
+		cards = append(cards, u.web.object())
+	}
+	cards = append(cards, u.mariadbCard(), u.banner)
 	for _, p := range u.parts {
-		cards = append(cards, p.object())
+		if p != u.web {
+			cards = append(cards, p.object())
+		}
 	}
 	top := vstack(10,
 		vstack(0, sectionTitle("Services"), vstack(8, cards...)),
@@ -521,6 +528,11 @@ func (u *ui) watch(interval time.Duration) {
 	go func() {
 		for range time.Tick(interval) {
 			u.checkNow()
+			fyne.Do(func() {
+				for _, p := range u.parts {
+					p.checkNow()
+				}
+			})
 		}
 	}()
 }
