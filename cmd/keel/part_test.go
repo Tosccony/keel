@@ -179,3 +179,35 @@ func freeTCPPort(t *testing.T) int {
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port
 }
+
+// The real FTP server, started from its card, serving the websites folder.
+func TestFTPPart(t *testing.T) {
+	home := t.TempDir()
+	opts := setup.Options{Home: home}
+	st := opts.Settings()
+	st.SetPort(setup.PartFTP, freeTCPPort(t))
+	svc := newFTPService(opts)
+	p, _ := newTestPart(t, svc)
+
+	p.finishStart(p.runStart()) // no websites folder yet
+	if p.running || countContaining(p.logLines(), "choose a websites folder first") != 1 {
+		t.Fatalf("started without a websites folder: %q", p.logLines())
+	}
+
+	st.SetSites(t.TempDir())
+	p.finishStart(p.runStart())
+	t.Cleanup(func() { svc.Stop(context.Background()) })
+	user, pass := st.FTPLogin()
+	if !p.running || !strings.Contains(p.card.detail.Text, "User "+user) || !strings.Contains(p.card.detail.Text, pass) {
+		t.Fatalf("running %v, detail %q", p.running, p.card.detail.Text)
+	}
+	conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(svc.server.Port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	p.finishStop(p.runStop())
+	if p.running {
+		t.Error("still running after Stop")
+	}
+}

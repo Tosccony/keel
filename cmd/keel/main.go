@@ -38,7 +38,9 @@ func main() {
 	u.prepare = opts.Prepare
 	settings := opts.Settings()
 	u.settings = settings
-	u.parts = append(u.parts, newPart(u.window, newMailService(opts), settings))
+	u.parts = append(u.parts,
+		newPart(u.window, newMailService(opts), settings),
+		newPart(u.window, newFTPService(opts), settings))
 	w.SetContent(u.content())
 	w.Resize(fyne.NewSize(820, 720))
 
