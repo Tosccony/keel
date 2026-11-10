@@ -43,6 +43,19 @@ func Java() (Download, bool) {
 	return d, true
 }
 
+// Perl is Strawberry Perl for Windows (macOS and Linux have Perl). The
+// portable edition is big because it carries a C compiler for building
+// Perl modules. Checksum: the release's published digest. Its zip has no
+// top folder: perl.exe ends up in perl/bin.
+var Perl = Download{
+	Version: "5.42.3.1",
+	URLs: []string{
+		"https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip",
+	},
+	Checksum: "sha256:6a081a811781c30aca51dbc036afd93092af91e3297901f02c17043795a10690",
+	SizeMB:   290,
+}
+
 // Download is one pinned download.
 type Download struct {
 	Version  string

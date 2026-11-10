@@ -47,6 +47,9 @@ func newPart(w *window, svc service, settings *setup.Settings) *part {
 	if pr, ok := svc.(progressReporter); ok {
 		pr.SetProgress(func(msg string) { fyne.Do(func() { p.log(info, msg) }) })
 	}
+	if tr, ok := svc.(taskRunner); ok {
+		tr.SetTaskRunner(p.runTask)
+	}
 	p.show()
 	return p
 }
@@ -173,6 +176,69 @@ func (p *part) menu() *fyne.Menu {
 func (p *part) showMenu() {
 	widget.ShowPopUpMenuAtRelativePosition(p.menu(), p.win.Canvas(),
 		fyne.NewPos(0, p.card.more.Size().Height), p.card.more)
+}
+
+// taskRunner is a service whose menu starts longer jobs, such as turning
+// on Perl (a download, then a restart). The part runs them.
+type taskRunner interface {
+	SetTaskRunner(func(label string, work func(context.Context) (string, error)))
+}
+
+// runTask runs work off the UI thread with the card busy, then restarts the
+// part if it was running, so it picks up the change. work's note goes to
+// the log.
+func (p *part) runTask(label string, work func(context.Context) (string, error)) {
+	if p.busy {
+		return
+	}
+	wasRunning := p.running
+	p.busy = true
+	p.card.showBusy(label + "…")
+	go func() {
+		r := p.doTask(wasRunning, work)
+		fyne.Do(func() { p.finishTask(label, r) })
+	}()
+}
+
+// taskResult is what doTask hands back to the UI thread.
+type taskResult struct {
+	notes   []string
+	err     error
+	running bool
+}
+
+// doTask is runTask's work, off the UI thread.
+func (p *part) doTask(wasRunning bool, work func(context.Context) (string, error)) taskResult {
+	ctx := context.Background()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var r taskResult
+	note, err := work(ctx)
+	r.notes = append(r.notes, note)
+	if err == nil && wasRunning {
+		if err = p.svc.Stop(ctx); err == nil {
+			note, err = p.svc.Start(ctx)
+			r.notes = append(r.notes, note)
+		}
+	}
+	r.err, r.running = err, p.svc.Running()
+	return r
+}
+
+// finishTask shows how a task went, on the UI thread.
+func (p *part) finishTask(label string, r taskResult) {
+	p.busy = false
+	p.running = r.running
+	p.show()
+	for _, n := range r.notes {
+		if n != "" {
+			p.log(info, n)
+		}
+	}
+	if r.err != nil {
+		p.log(bad, label+" didn't work: "+plain(r.err))
+		p.inform(label+" didn't work", plain(r.err))
+	}
 }
 
 // restart stops the part and starts it again, to pick up changed

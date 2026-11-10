@@ -51,6 +51,7 @@ type Server struct {
 	Sendmail      string // the sendmail stand-in, for PHP on macOS and Linux
 	Timezone      string // IANA name for date.timezone; "" leaves PHP's default
 	PHPMyAdmin    string // phpMyAdmin's folder, served at /phpmyadmin; "" for none
+	Perl          string // the perl program, to run .pl and .cgi files as CGI; "" for none
 
 	ReadyTimeout time.Duration // default 15s
 
@@ -85,11 +86,16 @@ func (s *Server) processes() {
 			PIDFile: filepath.Join(s.run(), "httpd.pid"),
 			Marker:  filepath.ToSlash(conf),
 		}
-		if s.PHPModule != "" {
-			// PHP's extensions need the DLLs in PHP's folder (ICU for intl,
-			// OpenSSL, libsodium), which Windows looks for on the PATH.
-			s.httpd.Env = []string{"PATH=" + filepath.Dir(s.PHPModule) + string(os.PathListSeparator) + os.Getenv("PATH")}
+	}
+	// On Windows, PHP's extensions need the DLLs in PHP's folder (ICU for
+	// intl, OpenSSL, libsodium), and Perl its own, all found on the PATH.
+	// It's set each time, as Perl may have been turned on since.
+	if s.PHPModule != "" {
+		path := filepath.Dir(s.PHPModule)
+		if s.Perl != "" {
+			path += string(os.PathListSeparator) + filepath.Dir(s.Perl)
 		}
+		s.httpd.Env = []string{"PATH=" + path + string(os.PathListSeparator) + os.Getenv("PATH")}
 	}
 	if s.fpm == nil && s.PHPFPM != "" {
 		conf := filepath.Join(s.conf(), "php-fpm.conf")

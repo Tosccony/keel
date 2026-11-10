@@ -66,9 +66,18 @@ DocumentRoot "{{.Sites}}"
     Require all denied
 </Directory>
 <Directory "{{.Sites}}">
-    Options Indexes FollowSymLinks
+    Options Indexes FollowSymLinks{{if .Perl}} ExecCGI{{end}}
     AllowOverride All
     Require all granted
+{{- if .Perl}}
+    # Perl scripts run as CGI, like XAMPP.
+    AddHandler cgi-script .pl .cgi
+{{- if .Windows}}
+    # Tutorials' "#!/usr/bin/perl" doesn't exist on Windows: use the program
+    # Keel registered for .pl and .cgi files instead.
+    ScriptInterpreterSource Registry-Strict
+{{- end}}
+{{- end}}
 </Directory>
 DirectoryIndex index.php index.html index.htm
 <Files ".ht*">
@@ -331,7 +340,7 @@ func (s *Server) vars() map[string]any {
 		"MimeTypes": slash(s.MimeTypes), "ModulesDir": slash(s.ModulesDir),
 		"PHPModule": slash(s.PHPModule), "Sendmail": s.Sendmail, "Timezone": s.Timezone,
 		"PHPMyAdmin": slash(s.PHPMyAdmin), "ExtensionDir": slash(s.ExtensionDir),
-		"Token": s.token,
+		"Token": s.token, "Perl": s.Perl,
 	}
 	v["Windows"] = runtime.GOOS == "windows"
 	if s.ModulesDir != "" {

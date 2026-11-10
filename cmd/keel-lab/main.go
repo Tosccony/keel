@@ -15,6 +15,7 @@
 //	go run ./cmd/keel-lab web-start     # start Apache with PHP
 //	go run ./cmd/keel-lab web-status    # is it running, and where
 //	go run ./cmd/keel-lab web-stop      # stop it
+//	go run ./cmd/keel-lab perl on|off   # run .pl and .cgi files (downloads Perl on Windows)
 //
 // The server keeps running after keel-lab exits, the same way it keeps
 // running after Keel's window closes.
@@ -28,9 +29,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/Tosccony/keel/internal/extras"
+	"github.com/Tosccony/keel/internal/fetch"
 	"github.com/Tosccony/keel/internal/mariadb"
 	"github.com/Tosccony/keel/internal/setup"
 )
@@ -39,7 +43,7 @@ func main() {
 	opts := setup.Defaults()
 	opts.AddFlags(flag.CommandLine)
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] init|start|status|check|stop|repair|backup|backups|restore NAME|sites DIR|web-start|web-status|web-stop")
+		fmt.Fprintln(os.Stderr, "usage: keel-lab [flags] init|start|status|check|stop|repair|backup|backups|restore NAME|sites DIR|web-start|web-status|web-stop|perl on|off")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -103,6 +107,21 @@ func main() {
 			fail(err)
 		}
 		fmt.Println("Websites folder:", dir)
+	case "perl":
+		on := flag.Arg(1) == "on"
+		if on && opts.Perl() == "" {
+			if runtime.GOOS != "windows" {
+				fail(fmt.Errorf("Perl isn't installed"))
+			}
+			fmt.Printf("Downloading Strawberry Perl %s (%d MB)...\n", extras.Perl.Version, extras.Perl.SizeMB)
+			if err := fetch.Install(ctx, fetch.Item{Name: "Strawberry Perl", URLs: extras.Perl.URLs, Checksum: extras.Perl.Checksum}, opts.PerlHome(), nil); err != nil {
+				fail(err)
+			}
+		}
+		if err := opts.Settings().SetPerl(on); err != nil {
+			fail(err)
+		}
+		fmt.Println("Perl scripts:", map[bool]string{true: "on", false: "off"}[on])
 	case "web-start", "web-stop", "web-status":
 		webCommand(ctx, opts, flag.Arg(0))
 	default:

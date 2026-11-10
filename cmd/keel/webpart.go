@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 
+	"github.com/Tosccony/keel/internal/extras"
+	"github.com/Tosccony/keel/internal/fetch"
 	"github.com/Tosccony/keel/internal/setup"
 	"github.com/Tosccony/keel/internal/web"
 )
@@ -26,6 +30,58 @@ type webService struct {
 
 	mu          sync.Mutex
 	apache, php string // versions, read in the background
+	progress    func(string)
+	runTask     func(label string, work func(context.Context) (string, error))
+}
+
+func (w *webService) SetProgress(f func(string)) { w.mu.Lock(); w.progress = f; w.mu.Unlock() }
+func (w *webService) SetTaskRunner(f func(string, func(context.Context) (string, error))) {
+	w.runTask = f
+}
+
+func (w *webService) say(msg string) {
+	w.mu.Lock()
+	f := w.progress
+	w.mu.Unlock()
+	if f != nil {
+		f(msg)
+	}
+}
+
+// setPerl turns Perl scripts on or off. Turning them on for the first time
+// on Windows downloads Strawberry Perl.
+func (w *webService) setPerl(ctx context.Context, on bool) (string, error) {
+	if on && w.opts.Perl() == "" {
+		if runtime.GOOS != "windows" {
+			return "", errors.New("Perl isn't installed on this computer")
+		}
+		d := extras.Perl
+		w.say(fmt.Sprintf("Downloading Strawberry Perl %s (%d MB)…", d.Version, d.SizeMB))
+		last := -1
+		err := fetch.Install(ctx, fetch.Item{Name: "Strawberry Perl", URLs: d.URLs, Checksum: d.Checksum}, w.opts.PerlHome(),
+			func(done, total int64) {
+				if total > 0 {
+					if pct := int(done * 100 / total); pct/10 != last/10 {
+						last = pct
+						w.say(fmt.Sprintf("Downloading Strawberry Perl: %d%%", pct))
+					}
+				}
+			})
+		if err != nil {
+			return "", err
+		}
+	}
+	if err := w.settings.SetPerl(on); err != nil {
+		return "", err
+	}
+	switch {
+	case !on:
+		return "Perl scripts are off.", nil
+	case runtime.GOOS == "windows":
+		return "Perl scripts are on: .pl and .cgi files in the websites folder run with Strawberry Perl.", nil
+	default:
+		return "Perl scripts are on: .pl and .cgi files in the websites folder run as CGI. Start each with #!/usr/bin/perl and make it executable (chmod +x).", nil
+	}
 }
 
 func newWebService(opts setup.Options) *webService {
@@ -112,6 +168,14 @@ func (w *webService) Menu() []*fyne.MenuItem {
 	})
 	pma.Icon = theme.StorageIcon()
 	pma.Disabled = w.opts.PHPMyAdmin() == ""
+	on := w.settings.Perl()
+	perl := fyne.NewMenuItem("Run Perl scripts (.pl, .cgi)", func() {
+		if w.runTask != nil {
+			w.runTask(map[bool]string{true: "Turning Perl off", false: "Turning Perl on"}[on],
+				func(ctx context.Context) (string, error) { return w.setPerl(ctx, !on) })
+		}
+	})
+	perl.Checked = on
 	return []*fyne.MenuItem{
 		pma,
 		fyne.NewMenuItemSeparator(),
@@ -120,6 +184,8 @@ func (w *webService) Menu() []*fyne.MenuItem {
 		fyne.NewMenuItemSeparator(),
 		item("Apache error log", theme.DocumentIcon(), w.server.ErrorLog(), false),
 		item("PHP error log", theme.DocumentIcon(), w.server.PHPErrorLog(), false),
+		fyne.NewMenuItemSeparator(),
+		perl,
 	}
 }
 

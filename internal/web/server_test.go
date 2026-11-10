@@ -256,3 +256,20 @@ func TestPHPString(t *testing.T) {
 		}
 	}
 }
+
+// Perl scripts run as CGI when Perl is turned on, like XAMPP.
+func TestPerlCGI(t *testing.T) {
+	s := newTestServer(t)
+	if _, err := os.Stat("/usr/bin/perl"); err != nil {
+		t.Skip("needs /usr/bin/perl")
+	}
+	s.Perl = "/usr/bin/perl"
+	os.WriteFile(filepath.Join(s.Sites, "hello.pl"), []byte("#!/usr/bin/perl\nprint \"Content-Type: text/plain\\n\\n\";\nprint \"hello from perl $]\\n\";\n"), 0o755)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop(context.Background()) })
+	if code, body := get(t, s, "/hello.pl"); code != 200 || !strings.HasPrefix(body, "hello from perl 5.") {
+		t.Errorf("hello.pl: %d %q", code, body)
+	}
+}

@@ -81,6 +81,14 @@ func (o Options) PrepareWeb(ctx context.Context, s *web.Server, sendmail string)
 	s.Sendmail = sendmail
 	s.Timezone = Timezone()
 	s.PHPMyAdmin = o.PHPMyAdmin()
+	s.Perl = ""
+	if st.Perl() {
+		if s.Perl = o.Perl(); s.Perl == "" {
+			notes = append(notes, "Perl scripts are turned on, but Perl isn't installed; turn them off and on again to install it.")
+		} else if err := registerPerl(s.Perl); err != nil {
+			notes = append(notes, "Couldn't register Perl for Apache: "+err.Error())
+		}
+	}
 	if wrote, err := web.WriteWelcome(sites); err == nil && wrote {
 		notes = append(notes, "The websites folder was empty, so Keel put a welcome page in it (index.php).")
 	}

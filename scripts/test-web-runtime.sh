@@ -48,6 +48,12 @@ mkdir -p "$DIR/htdocs/shop"
 printf 'RewriteEngine On\nRewriteRule ^p/([0-9]+)$ show.php?id=$1 [L]\n' > "$DIR/htdocs/shop/.htaccess"
 echo '<?php echo "product ", (int)$_GET["id"];' > "$DIR/htdocs/shop/show.php"
 
+# Perl scripts, the way tutorials write them. On Windows this downloads
+# Strawberry Perl and relies on the registry association Keel sets up.
+k perl on
+printf '#!/usr/bin/perl\nprint "Content-Type: text/plain\\n\\n";\nprint "hello from perl $]\\n";\n' > "$DIR/htdocs/hello.pl"
+chmod +x "$DIR/htdocs/hello.pl"
+
 out="$(k web-start)" || fail "web-start failed: $out"
 echo "$out"
 port="$(echo "$out" | sed -n 's|.*http://localhost:\([0-9]*\)/.*|\1|p' | tail -1)"
@@ -63,6 +69,9 @@ if [ -n "$PMA" ]; then
   curl -fsS "http://127.0.0.1:$port/phpmyadmin/" | grep -q "phpMyAdmin" || fail "phpMyAdmin didn't load"
   echo "phpMyAdmin loads"
 fi
+perl_out="$(curl -fsS "http://127.0.0.1:$port/hello.pl")" || fail "hello.pl didn't run"
+echo "$perl_out"
+echo "$perl_out" | grep -q "^hello from perl 5\." || fail "Perl CGI didn't work"
 k web-stop
 k web-status | grep -q "not running" || fail "still running after web-stop"
 echo "Web runtime OK"

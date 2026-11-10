@@ -43,3 +43,25 @@ func (o Options) KeelJava() string {
 	}
 	return filepath.Join(o.JavaHome(), "bin", exe("java"))
 }
+
+// Perl finds the Perl that runs CGI scripts: Strawberry Perl in Keel's
+// folder on Windows (downloaded when Perl scripts are first turned on), the
+// system's elsewhere. It returns "" when there's none.
+func (o Options) Perl() string {
+	if runtime.GOOS == "windows" {
+		p := o.KeelPerl()
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		return ""
+	}
+	if p, err := exec.LookPath("perl"); err == nil {
+		return p
+	}
+	return ""
+}
+
+// KeelPerl is where Strawberry Perl keeps perl.exe once downloaded.
+func (o Options) KeelPerl() string {
+	return filepath.Join(o.PerlHome(), "perl", "bin", "perl.exe")
+}

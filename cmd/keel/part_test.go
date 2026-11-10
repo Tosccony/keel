@@ -247,3 +247,24 @@ func TestTomcatPart(t *testing.T) {
 		t.Error("still running after Stop")
 	}
 }
+
+// A task (like turning on Perl) restarts a running part so the change
+// takes effect, and logs its note.
+func TestTaskRestartsARunningPart(t *testing.T) {
+	f := &fakeService{}
+	p, _ := newTestPart(t, f)
+	p.finishStart(p.runStart())
+	r := p.doTask(true, func(context.Context) (string, error) { return "Perl scripts are on.", nil })
+	p.finishTask("Turning Perl on", r)
+	if f.starts != 2 || !f.running || !p.running || p.busy {
+		t.Errorf("the part should have been restarted: %d starts, running %v", f.starts, f.running)
+	}
+	if countContaining(p.logLines(), "Perl scripts are on.") != 1 {
+		t.Errorf("log: %q", p.logLines())
+	}
+	r = p.doTask(true, func(context.Context) (string, error) { return "", errors.New("download failed") })
+	p.finishTask("Turning Perl on", r)
+	if f.starts != 2 || countContaining(p.logLines(), "Turning Perl on didn't work: download failed") != 1 {
+		t.Errorf("a failed task shouldn't restart, and should say so: %d starts, %q", f.starts, p.logLines())
+	}
+}

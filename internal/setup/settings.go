@@ -52,6 +52,7 @@ type settingsFile struct {
 	Autostart   []string       `json:"autostart,omitempty"`
 	FTPUser     string         `json:"ftpUser,omitempty"`
 	FTPPassword string         `json:"ftpPassword,omitempty"`
+	Perl        bool           `json:"perl,omitempty"` // run .pl and .cgi files in the websites folder
 }
 
 var (
@@ -159,6 +160,21 @@ func (s *Settings) SetAutostart(part string, on bool) error {
 		s.data.Autostart = append(s.data.Autostart, part)
 		slices.Sort(s.data.Autostart)
 	}
+	return s.save()
+}
+
+// Perl reports whether the web server runs Perl scripts.
+func (s *Settings) Perl() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.Perl
+}
+
+// SetPerl saves whether the web server runs Perl scripts.
+func (s *Settings) SetPerl(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.Perl = on
 	return s.save()
 }
 
