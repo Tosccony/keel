@@ -112,3 +112,40 @@ func TestQuitOnCloseAndPerlSettings(t *testing.T) {
 		t.Error("the settings didn't survive a restart")
 	}
 }
+
+// A portable Keel's websites folder sits beside its data folder. It's saved
+// relative to Keel's own folder, so it's still found after the drive gets
+// another letter; a folder elsewhere stays as it was given.
+func TestSitesInsideKeelsFolderMoveWithIt(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "E", "Keel")
+	path := filepath.Join(root, "data", "keel-settings.json")
+	sites := filepath.Join(root, "htdocs")
+	if err := OpenSettings(path).SetSites(sites); err != nil {
+		t.Fatal(err)
+	}
+	forgetSettings(path)
+	if got := OpenSettings(path).data.Sites; got != "htdocs" {
+		t.Errorf("saved %q, want it relative to Keel's folder", got)
+	}
+
+	moved := filepath.Join(filepath.Dir(filepath.Dir(root)), "F", "Keel") // the drive's new letter
+	if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	movedPath := filepath.Join(moved, "data", "keel-settings.json")
+	if got, want := OpenSettings(movedPath).Sites(), filepath.Join(moved, "htdocs"); got != want {
+		t.Errorf("after the move: %q, want %q", got, want)
+	}
+
+	outside := filepath.Join(t.TempDir(), "elsewhere")
+	if err := OpenSettings(movedPath).SetSites(outside); err != nil {
+		t.Fatal(err)
+	}
+	forgetSettings(movedPath)
+	if got := OpenSettings(movedPath); got.data.Sites != outside || got.Sites() != outside {
+		t.Errorf("a folder outside Keel's: saved %q, read %q, want %q", got.data.Sites, got.Sites(), outside)
+	}
+}

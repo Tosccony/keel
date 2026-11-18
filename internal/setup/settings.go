@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -134,16 +135,29 @@ func (s *Settings) takenByOthers(part string) func(int) bool {
 func (s *Settings) Sites() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if d := s.data.Sites; d != "" && !filepath.IsAbs(d) {
+		return filepath.Join(s.base(), d)
+	}
 	return s.data.Sites
 }
 
-// SetSites saves the websites folder.
+// SetSites saves the websites folder. A folder inside the one that holds
+// Keel's folder is saved relative to it, so a portable Keel still finds
+// its websites when the drive gets another letter on another computer.
 func (s *Settings) SetSites(dir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if rel, err := filepath.Rel(s.base(), dir); err == nil && filepath.IsAbs(dir) &&
+		rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		dir = rel
+	}
 	s.data.Sites = dir
 	return s.save()
 }
+
+// base is the folder that holds Keel's folder: a portable Keel's own
+// folder, since its settings are in data/ inside it.
+func (s *Settings) base() string { return filepath.Dir(filepath.Dir(s.path)) }
 
 // Autostart reports whether a part starts when Keel opens.
 func (s *Settings) Autostart(part string) bool {

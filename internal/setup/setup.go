@@ -45,10 +45,14 @@ type Options struct {
 }
 
 // Defaults returns the installed setup if this Keel carries its own
-// MariaDB, and the lab otherwise.
+// MariaDB, and the lab otherwise. A portable Keel keeps its files in a
+// data folder beside it instead of the computer's app data folder.
 func Defaults() Options {
 	if bin := Bundled(); bin != "" {
 		home := filepath.Join(appDataDir(), appFolderName())
+		if root := Portable(); root != "" {
+			home = filepath.Join(root, "data")
+		}
 		return Options{
 			Home:    home,
 			BinDir:  bin,
@@ -163,6 +167,24 @@ func findBundled(exeDir string) string {
 	return ""
 }
 
+// PortableFile marks a portable Keel: when it sits beside keel.exe, Keel
+// keeps everything in that folder (data and htdocs) instead of the
+// computer's own folders, so the folder can live on an external drive and
+// go from computer to computer.
+const PortableFile = "portable.txt"
+
+// Portable returns the folder of a portable Keel, or "" for an installed
+// one.
+func Portable() string { return portableRoot(exeDir()) }
+
+// portableRoot returns exeDir if PortableFile sits in it, and "" otherwise.
+func portableRoot(exeDir string) string {
+	if exeDir != "" && fileExists(filepath.Join(exeDir, PortableFile)) {
+		return exeDir
+	}
+	return ""
+}
+
 // appDataDir is where per-user app data goes: ~/Library/Application
 // Support on macOS, $XDG_DATA_HOME (or ~/.local/share) on Linux, and
 // %LOCALAPPDATA% on Windows. Never the roaming AppData folder: college
@@ -187,8 +209,12 @@ func appDataDir() string {
 }
 
 // DefaultSites is where the websites folder (XAMPP's htdocs) goes unless
-// the user picks another: Documents/Keel/htdocs, the same on every system.
+// the user picks another: Documents/Keel/htdocs, the same on every system,
+// or htdocs in a portable Keel's folder.
 func DefaultSites() string {
+	if root := Portable(); root != "" {
+		return filepath.Join(root, "htdocs")
+	}
 	return filepath.Join(documentsDir(), "Keel", "htdocs")
 }
 

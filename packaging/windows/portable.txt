@@ -1,0 +1,22 @@
+Keel, portable version
+======================
+
+This file makes this copy of Keel portable. Keel keeps everything in this
+folder, so you can carry it on an external drive:
+
+  data\     your databases, settings and Keel's logs
+  htdocs\   your websites (XAMPP's htdocs)
+
+Your databases and websites are never saved on the computer you plug the
+drive into, and Keel keeps working when the drive gets a different letter
+on another computer.
+
+Format the drive as NTFS or exFAT. FAT32 can't hold files over 4 GB, and
+databases grow.
+
+Before you eject the drive, choose "Stop everything" in Keel (or in its
+tray menu). If the drive is pulled out while Keel is running, Keel checks
+and recovers your databases the next time it starts.
+
+Don't delete this file: without it, Keel saves its data on the computer
+instead.

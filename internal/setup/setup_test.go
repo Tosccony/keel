@@ -94,3 +94,19 @@ func TestPrepareSetsUpOnFirstStart(t *testing.T) {
 		t.Errorf("a second Prepare should do nothing: %v", err)
 	}
 }
+
+func TestPortableNeedsTheMarkerBesideKeel(t *testing.T) {
+	dir := t.TempDir()
+	if got := portableRoot(dir); got != "" {
+		t.Errorf("without %s: %q, want an installed Keel", PortableFile, got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, PortableFile), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := portableRoot(dir); got != dir {
+		t.Errorf("with %s: %q, want %q", PortableFile, got, dir)
+	}
+	if got := portableRoot(""); got != "" {
+		t.Errorf("no program folder: %q", got)
+	}
+}

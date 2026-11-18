@@ -111,6 +111,10 @@ func (u *ui) showSettings() {
 
 	hint := muted("At sign-in, Keel starts in the tray and starts the parts set to \"Start when Keel opens\" (each card's menu).")
 	hint.Wrapping = fyne.TextWrapWord
+	if setup.Portable() != "" { // its drive may not be there, or have another letter, at the next sign-in
+		signIn.Hide()
+		hint.Hide()
+	}
 	content := container.New(fixedWidth(dialogWidth), container.NewVBox(
 		sectionTitle("Websites folder"),
 		container.NewBorder(nil, nil, nil, change, folder),
