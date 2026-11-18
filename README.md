@@ -6,7 +6,7 @@ A local web stack for Windows, macOS and Linux: Apache, PHP, MariaDB and phpMyAd
 - **Picks a free port on its own.** It starts on 8080. If that port is taken, it moves to the next free one and tells you.
 - **No accounts.** No sign-in, no telemetry.
 
-> **Status: early.** Every part XAMPP offers works in a development build: Apache with PHP 8.4, MariaDB (with crash-safe stopping, Repair, Back up and Restore), phpMyAdmin, a mail catcher, an FTP server, Tomcat and Perl. Putting the bundled runtimes into the installers is next (see [docs/plan.md](docs/plan.md)); until then a development build uses programs you install yourself, with its files in `~/personal/keel-lab`.
+> **Status: early.** Every part XAMPP offers is in the downloads: Apache with PHP 8.4, MariaDB (with crash-safe stopping, Repair, Back up and Restore), phpMyAdmin, a mail catcher, an FTP server, Tomcat and Perl. Tomcat and Perl download the first time you turn them on. See [docs/plan.md](docs/plan.md) for what's next.
 
 ## Install
 
@@ -15,6 +15,7 @@ Download the latest version:
 | System | Download |
 |---|---|
 | Windows 10/11 (x64; Windows 11 on ARM runs it through emulation) | [Keel-Setup-x64.exe](https://github.com/Tosccony/keel/releases/latest/download/Keel-Setup-x64.exe) |
+| Windows, portable: no install and no admin rights, for an external drive | [Keel-Portable-x64.zip](https://github.com/Tosccony/keel/releases/latest/download/Keel-Portable-x64.zip) |
 | macOS 12 or later (Apple Silicon and Intel) | [Keel-macOS.dmg](https://github.com/Tosccony/keel/releases/latest/download/Keel-macOS.dmg) |
 | Ubuntu, Debian, Mint | [keel_amd64.deb](https://github.com/Tosccony/keel/releases/latest/download/keel_amd64.deb) |
 | Fedora, openSUSE | [keel_x86_64.rpm](https://github.com/Tosccony/keel/releases/latest/download/keel_x86_64.rpm) |
@@ -38,8 +39,21 @@ irm https://raw.githubusercontent.com/Tosccony/keel/main/install.ps1 | iex
 
 The installers aren't code-signed yet, so the first launch shows a warning:
 
-- **Windows:** SmartScreen may say "Windows protected your PC". Click **More info**, then **Run anyway**.
+- **Windows:** SmartScreen may say "Windows protected your PC". Click **More info**, then **Run anyway**. The portable `keel.exe` shows the same warning the first time.
 - **macOS:** If you downloaded the .dmg in a browser, macOS blocks the first open. Open **System Settings > Privacy & Security**, scroll down, and click **Open Anyway**. The install script doesn't trigger this.
+
+### Portable version (Windows)
+
+For a USB stick or an external drive, or a computer where you can't install programs:
+
+1. Unzip `Keel-Portable-x64.zip` onto the drive. It makes a `Keel` folder.
+2. Open `Keel\keel.exe`.
+
+Everything stays in that folder: your databases in `Keel\data` and your websites in `Keel\htdocs`. Nothing is installed or saved on the computer, and the drive can have a different letter on each computer.
+
+- Use a drive formatted as **NTFS or exFAT**. FAT32 can't hold files over 4 GB, and MariaDB's files can grow past that.
+- Before you eject the drive, choose **Stop everything** in Keel's tray menu. If the drive is pulled out while MariaDB runs, Keel recovers the database the next time it starts, but stopping first is safer.
+- "Open Keel when I sign in" isn't offered in the portable version, because the drive might not be plugged in.
 
 ## Releasing
 
@@ -53,7 +67,9 @@ GitHub Actions builds every release (`.github/workflows/release.yml`).
    git push origin v0.1.0
    ```
 
-3. Actions builds the Windows `.exe`, the macOS `.dmg`, and the Linux `.deb`, `.rpm` and `.tar.gz`. It adds `SHA256SUMS.txt` and publishes a GitHub release. The "latest" download links above then point to the new release automatically.
+3. Actions builds the Windows `.exe` and portable `.zip`, the macOS `.dmg`, and the Linux `.deb`, `.rpm` and `.tar.gz`. On a Windows machine it installs the `.exe` and runs the portable `.zip` from an exFAT drive, and checks that PHP, MariaDB and phpMyAdmin work in both. It then adds `SHA256SUMS.txt` and publishes a GitHub release. The "latest" download links above then point to the new release automatically.
+
+The installers take MariaDB, Apache, PHP and phpMyAdmin from the `mariadb-*` and `web-*` pre-releases. After changing a version in `packaging/*/*.env`, run the MariaDB or Web workflow with **publish** ticked before tagging.
 
 Tags with a hyphen, like `v0.2.0-beta.1`, become pre-releases and don't replace "latest".
 
@@ -81,14 +97,14 @@ scripts/package-macos.sh 0.1.0        # macOS: dist/Keel-macOS.dmg
 scripts/package-linux.sh 0.1.0        # Linux: dist/*.deb, *.rpm, *.tar.gz (needs nfpm)
 ```
 
-On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel.iss` (Inno Setup 6) to get `dist\Keel-Setup-x64.exe`.
+On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel.iss` (Inno Setup 6) to get `dist\Keel-Setup-x64.exe`. The release workflow also builds the icon and version details into `keel.exe` with MinGW's `windres`, from `packaging/windows/keel.rc`, and puts together the portable `.zip`.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `cmd/keel/` | The Keel window: a card per part (web server, MariaDB, mail catcher, FTP server, Tomcat) with Start/Stop and a menu, the tray icon, Settings, Terminal, Ports, and the activity log. `icon.svg` is the logo; `theme.go` holds the light and dark colours |
-| `internal/setup/` | Which MariaDB Keel runs and where its files live: the bundled one and the user's app data folder in an installed Keel, or the lab in a development build. Creates the data folder on the first start, and remembers a port Keel moved to in `keel-settings.json` |
+| `internal/setup/` | Which MariaDB Keel runs and where its files live: the bundled one and the user's app data folder in an installed Keel, the Keel folder itself in a portable one (`portable.txt` beside `keel.exe`), or the lab in a development build. Creates the data folder on the first start, and remembers a port Keel moved to in `keel-settings.json` |
 | `internal/ports/` | Finds free ports, names the program holding a taken one, and lists every listening port |
 | `internal/web/` | The web server: Apache with PHP (PHP-FPM on macOS and Linux, a module on Windows), config written at every start, phpMyAdmin, Perl CGI, the welcome page |
 | `internal/mail/` | The mail catcher: a receive-only SMTP server, the inbox page, and the sendmail stand-in |
@@ -99,13 +115,14 @@ On Windows, build `dist\windows\keel.exe`, then run `iscc packaging\windows\keel
 | `internal/extras/` | The pinned versions of those parts: Tomcat, Java, Strawberry Perl |
 | `internal/mariadb/` | Starts and stops MariaDB safely, and recovers from unclean shutdowns: a crash journal, a safety copy before recovery, a check of every table, Repair, Back up and Restore, and a lock so two Keels never act on the same data folder at once |
 | `cmd/keel-lab/` | Command-line tool for trying the server code (start, stop, check, repair, backup, restore). Not shipped |
-| `packaging/windows/` | Inno Setup script and icon for the `.exe` installer |
+| `packaging/windows/` | Inno Setup script and icon for the `.exe` installer; `keel.rc`, the icon and version details built into `keel.exe`; `portable.txt`, which marks the portable `.zip` and explains it |
 | `packaging/macos/` | `Info.plist` and icon for `Keel.app` |
 | `packaging/linux/` | `.desktop` entry, icon, and nfpm config for `.deb` and `.rpm` |
 | `scripts/` | Packaging scripts the release workflow runs; the runtime scripts (MariaDB: `fetch-mariadb.sh`, `build-mariadb.sh`, `trim-mariadb.sh`, `test-mariadb-runtime.sh`; web: `build-apache.sh`, `build-php.sh`, `fetch-web-windows.sh`, `fetch-phpmyadmin.sh`, `test-web-runtime.sh`, `merge-macos.sh`); and `make-icons.sh` |
 | `packaging/mariadb/mariadb.env`, `packaging/web/web.env`, `packaging/phpmyadmin/phpmyadmin.env` | The versions Keel ships, with the checksum of every download |
 | `install.sh`, `install.ps1` | One-line installers for the latest release |
-| `.github/workflows/release.yml` | Tag-triggered build and release |
+| `.github/workflows/release.yml` | Tag-triggered build, Windows install and portable checks, and release |
+| `.github/workflows/windows.yml` | Keel's tests on Windows x64 and on Windows on ARM (the x64 build, in Microsoft's emulator), on every push |
 | `.github/workflows/mariadb.yml`, `web.yml` | Prepare and test the MariaDB, Apache, PHP and phpMyAdmin that Keel ships, on all three systems (run by hand) |
 | `docs/testing.md` | Every test case, automated and still to do |
 | `docs/plan.md` | Everything XAMPP offers, how Keel does each, and the order of work |

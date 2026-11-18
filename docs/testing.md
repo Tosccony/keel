@@ -203,6 +203,12 @@ Repair works even when MariaDB won't start. These cases use real MariaDB and the
 | 143 | HTTPS serves the same site and PHP (`$_SERVER['HTTPS']` is on) with Keel's settings, on the development Apache and on each system's built Apache | `TestHTTPS`, `scripts/test-web-runtime.sh` |
 | 144 | The packaged Keel.app with all four runtimes: its signature verifies, and after marking every file as downloaded, Keel's start clears the marks and the bundled Apache, MariaDB and PHP run (without it, macOS holds them) | Manual, 2026-11-10 |
 | 145 | After an update brings a newer MariaDB, the next start runs mariadb-upgrade (through Keel's account, so a root password doesn't matter; Windows checked in the VM); an up-to-date data folder is left alone | `TestUpgradeAfterAMariaDBUpdate`, `TestVersions` |
+| 165 | Portable: `portable.txt` beside `keel.exe` keeps Keel's files in `data` in that folder and suggests its `htdocs` for websites; without it, an installed Keel uses the computer's folders | `TestPortableNeedsTheMarkerBesideKeel` |
+| 166 | A websites folder inside the portable folder is saved relative, so it's found after the drive gets another letter; a folder outside it stays absolute, and older absolute settings still work | `TestSitesInsideKeelsFolderMoveWithIt` |
+| 167 | The Windows installer, installed silently into Program Files: the bundled MariaDB, Apache and PHP (every promised extension), PHP reaching MariaDB as root through mysqli and PDO, phpMyAdmin and HTTPS | `scripts/test-windows-package.sh` in the Release workflow |
+| 168 | The portable zip run from an exFAT drive: the same checks, then the drive gets a new letter and the data and websites are still there; nothing is written to the computer's `%LOCALAPPDATA%\Keel` | `scripts/test-windows-package.sh` in the Release workflow |
+| 169 | `keel.exe` carries the Keel icon and version details (Task Manager says "Keel") | Release workflow, after the build |
+| 170 | Keel's tests on Windows x64, and on Windows on ARM with the x64 build in Microsoft's emulator, on every push | `.github/workflows/windows.yml` |
 
 ## Still to cover
 
@@ -214,7 +220,7 @@ These need real hardware, features that aren't built yet, or a longer run.
 | 147 | OS restart or shutdown while MariaDB runs | Must stop cleanly before the OS kills it | Background service (phase 2) |
 | 148 | Laptop sleep and hibernate mid-write | Server frozen, then resumed | Manual test |
 | 149 | Disk really full during recovery (not simulated) | MariaDB needs space to recover | Manual test |
-| 150 | Data on exFAT/USB, or backups on another drive | No cloning; plain copy across drives | Manual test |
+| 150 | Backups on another drive (data on an exFAT drive is case 168) | No cloning; plain copy across drives | Manual test |
 | 151 | Linux on Btrfs/XFS (reflink) and ext4 (plain copy) | Different copy paths | Linux test machine |
 | 152 | Windows antivirus locking files mid-copy; OneDrive folders | Copy failures on Windows | Windows support |
 | 153 | Keel killed during the safety copy | Must never use a `.partial` copy | Add an automated test |
@@ -229,3 +235,5 @@ These need real hardware, features that aren't built yet, or a longer run.
 | 162 | InnoDB damage that stops MariaDB starting at all | Repair can't fix InnoDB in place; the answer is a restore, or innodb_force_recovery and a dump | Manual test |
 | 163 | Keel killed while repair mode is running | MariaDB keeps running without account checks until stopped; the window should say so | Add an automated test |
 | 164 | Repair on Windows (aria_chk.exe, Windows paths) | The XAMPP errors are mostly seen on Windows | Windows support |
+| 171 | The portable zip on a PC that never had the Visual C++ runtime | The zip carries the runtime's DLLs, but CI machines always have the runtime installed, so only a clean PC proves they're enough | Manual test on a clean Windows PC |
+| 172 | A restore interrupted by pulling the drive out, finished on a PC where the drive has another letter | The journal keeps the copy's full path, so the restore won't find it | Save the path relative, if it ever matters |
