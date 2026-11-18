@@ -13,6 +13,14 @@ on:
     paths: ["**.go", go.mod, go.sum, .github/workflows/windows.yml]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A newer push replaces an older run of the same branch or pull request.
+concurrency:
+  group: windows-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   x64:
     runs-on: windows-latest
@@ -26,7 +34,7 @@ jobs:
           go-version-file: go.mod
       - name: Install C compiler (the window toolkit needs cgo)
         id: msys2
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
           msystem: MINGW64
           install: mingw-w64-x86_64-gcc

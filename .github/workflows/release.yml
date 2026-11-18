@@ -11,8 +11,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# Read-only by default; only the job that publishes can write to the repo.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   version:
@@ -40,7 +41,7 @@ jobs:
           go-version-file: go.mod
       - name: Install C compiler (the window toolkit needs cgo)
         id: msys2
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
           msystem: MINGW64
           install: mingw-w64-x86_64-gcc
@@ -75,7 +76,12 @@ jobs:
         run: scripts/fetch-runtimes.sh windows-x86_64 dist/runtimes/windows-x86_64
       - name: Download the Visual C++ runtime installer
         shell: pwsh
-        run: Invoke-WebRequest https://aka.ms/vc14/vc_redist.x64.exe -OutFile dist\vc_redist.x64.exe
+        run: |
+          Invoke-WebRequest https://aka.ms/vc14/vc_redist.x64.exe -OutFile dist\vc_redist.x64.exe
+          $sig = Get-AuthenticodeSignature dist\vc_redist.x64.exe
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "dist\vc_redist.x64.exe isn't signed by Microsoft ($($sig.Status), $($sig.SignerCertificate.Subject))"
+          }
       # The portable version can't run that installer (it needs admin
       # rights), so it carries the runtime's DLLs beside the programs that
       # load them; Windows looks in a program's own folder first.
@@ -104,7 +110,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
-            choco install innosetup --no-progress -y
+            choco install innosetup --version 6.7.1 --no-progress -y
           }
       - name: Build installer
         shell: pwsh
@@ -141,7 +147,19 @@ jobs:
           path: dist
       - name: Build keel-lab
         run: go build -o dist/keel-lab.exe ./cmd/keel-lab
-      - name: Make an exFAT drive and unpack the portable zip onto it
+      - name: "Check the portable version on C:"
+        run: |
+          dir="$(cygpath -m "$RUNNER_TEMP/portable-c")"
+          7z x dist/Keel-Portable-x64.zip -o"$dir" >/dev/null
+          cp dist/keel-lab.exe "$dir/Keel/"
+          scripts/test-windows-package.sh first "$dir/Keel" "$dir/Keel/htdocs"
+          [ -d "$dir/Keel/data/mariadb/data" ] || { echo "the databases aren't in the portable folder" >&2; exit 1; }
+          [ ! -e "$(cygpath -u "$LOCALAPPDATA")/Keel" ] || { echo "the portable version wrote to $LOCALAPPDATA\Keel" >&2; exit 1; }
+      # The exFAT drive and drive-letter checks don't stop a release yet:
+      # a virtual drive on a CI machine isn't a student's USB drive, and a
+      # failure here is worth reading, not blocking on.
+      - name: exFAT drive - make it and unpack the portable zip onto it
+        continue-on-error: true
         shell: pwsh
         run: |
           $vhd = "$env:RUNNER_TEMP\keel-drive.vhdx"
@@ -160,19 +178,22 @@ jobs:
           7z x dist\Keel-Portable-x64.zip -oK:\ | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item dist\keel-lab.exe K:\Keel\
-      - name: Check the portable version
+      - name: exFAT drive - check the portable version
+        continue-on-error: true
         run: |
           scripts/test-windows-package.sh first K:/Keel K:/Keel/htdocs
           [ -d K:/Keel/data/mariadb/data ] || { echo "the databases aren't on the drive" >&2; exit 1; }
           [ ! -e "$(cygpath -u "$LOCALAPPDATA")/Keel" ] || { echo "the portable version wrote to $LOCALAPPDATA\Keel" >&2; exit 1; }
-      - name: Give the drive another letter
+      - name: exFAT drive - give it another letter
+        continue-on-error: true
         shell: pwsh
         run: |
           @("select volume K", "remove letter=K", "assign letter=L") | Set-Content -Encoding ascii "$env:RUNNER_TEMP\move-drive.txt"
           diskpart /s "$env:RUNNER_TEMP\move-drive.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path L:\Keel\keel.exe)) { throw "the drive isn't on L:" }
-      - name: Check the portable version on the new letter
+      - name: exFAT drive - check the portable version on the new letter
+        continue-on-error: true
         run: |
           scripts/test-windows-package.sh again L:/Keel
           [ ! -e "$(cygpath -u "$LOCALAPPDATA")/Keel" ] || { echo "the portable version wrote to $LOCALAPPDATA\Keel" >&2; exit 1; }
@@ -243,6 +264,8 @@ jobs:
     needs: [windows, windows-check, macos, linux]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v7
         with:

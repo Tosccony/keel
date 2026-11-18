@@ -19,8 +19,9 @@ on:
         type: boolean
         default: false
 
+# Read-only by default; only the job that publishes can write to the repo.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows:
@@ -37,6 +38,10 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest https://aka.ms/vc14/vc_redist.x64.exe -OutFile vc_redist.x64.exe
+          $sig = Get-AuthenticodeSignature vc_redist.x64.exe
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "vc_redist.x64.exe isn't signed by Microsoft ($($sig.Status), $($sig.SignerCertificate.Subject))"
+          }
           Start-Process .\vc_redist.x64.exe -ArgumentList "/install","/quiet","/norestart" -Wait
       - run: scripts/fetch-web-windows.sh
       - run: scripts/fetch-phpmyadmin.sh
@@ -133,6 +138,8 @@ jobs:
     if: ${{ inputs.publish }}
     needs: [windows, linux, macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v7
