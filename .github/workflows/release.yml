@@ -47,6 +47,16 @@ jobs:
       - name: Put gcc on PATH
         shell: pwsh
         run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin"
+      # MinGW's windres (installed with gcc) turns packaging/windows/keel.rc
+      # into a .syso file, which go build links into keel.exe.
+      - name: Embed the icon and version in keel.exe
+        shell: bash
+        run: |
+          mkdir -p dist
+          num="${VERSION%%-*}"
+          num="${num//./,},0"
+          sed "s/@VERSION@/$VERSION/g; s/@VERSION_NUM@/$num/g" packaging/windows/keel.rc > dist/keel.rc
+          windres --include-dir packaging/windows -i dist/keel.rc -O coff -o cmd/keel/rsrc_windows_amd64.syso
       - name: Build keel.exe
         shell: pwsh
         env:
@@ -54,12 +64,42 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist\windows | Out-Null
           go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$env:VERSION" -o dist\windows\keel.exe ./cmd/keel
+      - name: Check keel.exe carries the icon and version
+        shell: pwsh
+        run: |
+          $info = (Get-Item dist\windows\keel.exe).VersionInfo
+          $info | Format-List FileDescription, ProductVersion, FileVersion
+          if ($info.FileDescription -ne 'Keel') { throw "keel.exe has no version resource, so its icon is missing too" }
       - name: Download the runtimes
         shell: bash
         run: scripts/fetch-runtimes.sh windows-x86_64 dist/runtimes/windows-x86_64
       - name: Download the Visual C++ runtime installer
         shell: pwsh
         run: Invoke-WebRequest https://aka.ms/vc14/vc_redist.x64.exe -OutFile dist\vc_redist.x64.exe
+      # The portable version can't run that installer (it needs admin
+      # rights), so it carries the runtime's DLLs beside the programs that
+      # load them; Windows looks in a program's own folder first.
+      - name: Build the portable zip
+        shell: pwsh
+        run: |
+          Start-Process dist\vc_redist.x64.exe -ArgumentList "/install","/quiet","/norestart" -Wait
+          $root = "dist\portable\Keel"
+          Remove-Item -Recurse -Force dist\portable -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $root | Out-Null
+          Copy-Item dist\windows\keel.exe, packaging\windows\portable.txt $root
+          foreach ($part in "mariadb", "apache", "php", "phpmyadmin") {
+            Copy-Item -Recurse "dist\runtimes\windows-x86_64\$part" $root
+          }
+          $dlls = "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "concrt140.dll"
+          foreach ($dir in "$root\apache\bin", "$root\php", "$root\mariadb\bin") {
+            foreach ($dll in $dlls) { Copy-Item "$env:SystemRoot\System32\$dll" $dir }
+          }
+          Push-Location dist\portable
+          7z a -tzip -mx=9 ..\Keel-Portable-x64.zip Keel | Out-Null
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0) { exit $code }
+          Get-Item dist\Keel-Portable-x64.zip | Format-List Name, Length
       - name: Install Inno Setup
         shell: pwsh
         run: |
@@ -75,8 +115,79 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: windows
-          path: dist/Keel-Setup-x64.exe
+          path: |
+            dist/Keel-Setup-x64.exe
+            dist/Keel-Portable-x64.zip
           if-no-files-found: error
+
+  # Installs the installer and unpacks the portable zip, then checks each
+  # with scripts/test-windows-package.sh. The portable zip runs from an
+  # exFAT virtual drive, like a student's external drive, and again after
+  # the drive gets another letter. A failure here stops the release.
+  windows-check:
+    needs: windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v7
+        with:
+          name: windows
+          path: dist
+      - name: Build keel-lab
+        run: go build -o dist/keel-lab.exe ./cmd/keel-lab
+      - name: Make an exFAT drive and unpack the portable zip onto it
+        shell: pwsh
+        run: |
+          $vhd = "$env:RUNNER_TEMP\keel-drive.vhdx"
+          @(
+            "create vdisk file=`"$vhd`" maximum=8192 type=expandable",
+            "select vdisk file=`"$vhd`"",
+            "attach vdisk",
+            "create partition primary",
+            "format fs=exfat quick label=KEELDRIVE",
+            "assign letter=K"
+          ) | Set-Content -Encoding ascii "$env:RUNNER_TEMP\make-drive.txt"
+          diskpart /s "$env:RUNNER_TEMP\make-drive.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Volume -DriveLetter K | Format-List DriveLetter, FileSystem, Size
+          if ((Get-Volume -DriveLetter K).FileSystem -ne "exFAT") { throw "K: isn't exFAT" }
+          7z x dist\Keel-Portable-x64.zip -oK:\ | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist\keel-lab.exe K:\Keel\
+      - name: Check the portable version
+        run: |
+          scripts/test-windows-package.sh first K:/Keel K:/Keel/htdocs
+          [ -d K:/Keel/data/mariadb/data ] || { echo "the databases aren't on the drive" >&2; exit 1; }
+          [ ! -e "$(cygpath -u "$LOCALAPPDATA")/Keel" ] || { echo "the portable version wrote to $LOCALAPPDATA\Keel" >&2; exit 1; }
+      - name: Give the drive another letter
+        shell: pwsh
+        run: |
+          @("select volume K", "remove letter=K", "assign letter=L") | Set-Content -Encoding ascii "$env:RUNNER_TEMP\move-drive.txt"
+          diskpart /s "$env:RUNNER_TEMP\move-drive.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path L:\Keel\keel.exe)) { throw "the drive isn't on L:" }
+      - name: Check the portable version on the new letter
+        run: |
+          scripts/test-windows-package.sh again L:/Keel
+          [ ! -e "$(cygpath -u "$LOCALAPPDATA")/Keel" ] || { echo "the portable version wrote to $LOCALAPPDATA\Keel" >&2; exit 1; }
+      - name: Install Keel
+        shell: pwsh
+        run: |
+          Start-Process dist\Keel-Setup-x64.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
+          $app = "$env:ProgramFiles\Keel"
+          if (-not (Test-Path "$app\keel.exe")) { throw "Keel isn't installed in $app" }
+          foreach ($lnk in "$env:PUBLIC\Desktop\Keel.lnk", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Keel.lnk") {
+            if (-not (Test-Path $lnk)) { throw "no shortcut at $lnk" }
+          }
+          Copy-Item dist\keel-lab.exe $app
+      - name: Check the installed version
+        run: scripts/test-windows-package.sh first "$PROGRAMFILES/Keel" "$RUNNER_TEMP/htdocs"
 
   macos:
     needs: version
@@ -129,7 +240,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [windows, macos, linux]
+    needs: [windows, windows-check, macos, linux]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,65 @@
+# Runs Keel's Go tests on Windows: on x64, and on Windows on ARM, where the
+# x64 build runs in Microsoft's emulator, the way Keel runs there. The
+# MariaDB tests use MariaDB's official Windows build
+# (scripts/fetch-mariadb.sh) through KEEL_MARIADB_BIN, so they run instead
+# of skipping.
+name: Windows tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["**.go", go.mod, go.sum, .github/workflows/windows.yml]
+  pull_request:
+    paths: ["**.go", go.mod, go.sum, .github/workflows/windows.yml]
+  workflow_dispatch:
+
+jobs:
+  x64:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install C compiler (the window toolkit needs cgo)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc
+      - name: Put gcc on PATH
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin"
+      - name: Download MariaDB
+        run: |
+          scripts/fetch-mariadb.sh windows
+          echo "KEEL_MARIADB_BIN=$(cygpath -m "$PWD/dist/mariadb/windows-x86_64/mariadb/bin")" >> "$GITHUB_ENV"
+      - name: Go tests
+        env:
+          CGO_ENABLED: "1"
+        run: go test -timeout 30m ./...
+
+  arm:
+    runs-on: windows-11-arm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Download MariaDB
+        run: |
+          scripts/fetch-mariadb.sh windows
+          echo "KEEL_MARIADB_BIN=$(cygpath -m "$PWD/dist/mariadb/windows-x86_64/mariadb/bin")" >> "$GITHUB_ENV"
+      # The window needs cgo and an x64 C compiler, so only the server code
+      # runs here; it's what the emulator affects (MariaDB's TLS, say).
+      - name: Go tests (x64 build, in the emulator)
+        env:
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go test -timeout 30m ./internal/...
