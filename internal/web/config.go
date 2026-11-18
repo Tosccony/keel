@@ -110,7 +110,14 @@ Alias /phpmyadmin "{{.PHPMyAdmin}}"
 <Directory "{{.PHPMyAdmin}}">
     Options FollowSymLinks
     AllowOverride None
-    Require local
+    # phpMyAdmin logs in as root by itself, so it only answers requests
+    # addressed to this computer. A website open in the browser could
+    # otherwise point its own domain at 127.0.0.1 (DNS rebinding), and
+    # Require local alone would let it in.
+    <RequireAll>
+        Require local
+        Require expr "%{HTTP_HOST} =~ /^(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?$/i"
+    </RequireAll>
     # Keel's phpMyAdmin reads its config and writes its temporary files
     # here, not in its own folder (see scripts/fetch-phpmyadmin.sh).
     SetEnv KEEL_PMA_CONFIG "{{.Conf}}/phpmyadmin.inc.php"

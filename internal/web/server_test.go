@@ -249,6 +249,39 @@ func TestPHPMyAdminConfig(t *testing.T) {
 	}
 }
 
+// phpMyAdmin answers only requests addressed to this computer, so a
+// website that points its own domain at 127.0.0.1 can't reach it.
+func TestPHPMyAdminRefusesOtherHosts(t *testing.T) {
+	s := newTestServer(t)
+	s.PHPMyAdmin = filepath.Join(filepath.Dir(s.Sites), "pma")
+	os.MkdirAll(s.PHPMyAdmin, 0o755)
+	os.WriteFile(filepath.Join(s.PHPMyAdmin, "index.php"), []byte(`<?php echo "pma";`), 0o644)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop(context.Background()) })
+	for host, want := range map[string]int{
+		"localhost:" + strconv.Itoa(s.Port): 200,
+		"127.0.0.1":                         200,
+		"LOCALHOST":                         200,
+		"[::1]:" + strconv.Itoa(s.Port):     200,
+		"evil.example":                      403,
+		"localhost.evil.example":            403,
+		"127.0.0.1.nip.io":                  403,
+	} {
+		req, _ := http.NewRequest("GET", "http://127.0.0.1:"+strconv.Itoa(s.Port)+"/phpmyadmin/", nil)
+		req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("Host %s: %d, want %d", host, resp.StatusCode, want)
+		}
+	}
+}
+
 func TestPHPString(t *testing.T) {
 	for in, want := range map[string]string{`C:\xampp`: `'C:\\xampp'`, "it's": `'it\'s'`, "plain": "'plain'"} {
 		if got := phpString(in); got != want {

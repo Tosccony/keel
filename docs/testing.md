@@ -209,6 +209,7 @@ Repair works even when MariaDB won't start. These cases use real MariaDB and the
 | 168 | The portable zip run from an exFAT drive: the same checks, then the drive gets a new letter and the data and websites are still there; nothing is written to the computer's `%LOCALAPPDATA%\Keel` | `scripts/test-windows-package.sh` in the Release workflow |
 | 169 | `keel.exe` carries the Keel icon and version details (Task Manager says "Keel") | Release workflow, after the build |
 | 170 | Keel's tests on Windows x64, and on Windows on ARM with the x64 build in Microsoft's emulator, on every push | `.github/workflows/windows.yml` |
+| 173 | phpMyAdmin (which logs in as root by itself) refuses requests addressed to any host but localhost, 127.0.0.1 or ::1, so a website using DNS rebinding can't reach it | `TestPHPMyAdminRefusesOtherHosts`, `scripts/test-windows-package.sh` |
 
 ## Still to cover
 

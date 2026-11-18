@@ -84,6 +84,9 @@ grep -q "^note=$NOTE$" <<<"$page" || fail "PDO didn't read the saved row"
 
 pma="$(curl -sS "http://127.0.0.1:$port/phpmyadmin/")" || fail "phpMyAdmin didn't load"
 grep -q "phpMyAdmin" <<<"$pma" || fail "phpMyAdmin's page isn't phpMyAdmin"
+# A website pointing its own domain at 127.0.0.1 (DNS rebinding) must not reach it.
+rebind="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: evil.example" "http://127.0.0.1:$port/phpmyadmin/")"
+[ "$rebind" = 403 ] || fail "phpMyAdmin answered a request for another host ($rebind)"
 secure="$(curl -sSk "https://127.0.0.1:$https_port/check.php")" || fail "HTTPS didn't answer"
 grep -q "^PHP $WANT_PHP\." <<<"$secure" || fail "HTTPS didn't serve PHP"
 echo "phpMyAdmin and HTTPS work"
