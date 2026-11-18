@@ -135,7 +135,7 @@ func (s *Settings) takenByOthers(part string) func(int) bool {
 func (s *Settings) Sites() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if d := s.data.Sites; d != "" && !filepath.IsAbs(d) {
+	if d := s.data.Sites; filepath.IsLocal(d) { // saved relative by SetSites
 		return filepath.Join(s.base(), d)
 	}
 	return s.data.Sites
