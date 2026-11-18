@@ -42,17 +42,16 @@ OutputBaseFilename=Keel-Setup-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; keel.ico is the setup program's own icon. keel.exe carries the same icon
+; (packaging/windows/keel.rc), so shortcuts and Apps & features use it.
 SetupIconFile=keel.ico
-; keel.exe has no icon of its own yet (that needs a resource tool), so the
-; shortcuts and Apps & features use keel.ico. The window sets its own icon.
-UninstallDisplayIcon={app}\keel.ico
+UninstallDisplayIcon={app}\keel.exe
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "keel.exe"; Flags: ignoreversion
-Source: "keel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RuntimeDir}\mariadb\*"; DestDir: "{app}\mariadb"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#RuntimeDir}\apache\*"; DestDir: "{app}\apache"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#RuntimeDir}\php\*"; DestDir: "{app}\php"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -60,8 +59,8 @@ Source: "{#RuntimeDir}\phpmyadmin\*"; DestDir: "{app}\phpmyadmin"; Flags: ignore
 Source: "{#VCRedist}"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
-Name: "{autoprograms}\Keel"; Filename: "{app}\keel.exe"; IconFilename: "{app}\keel.ico"
-Name: "{autodesktop}\Keel"; Filename: "{app}\keel.exe"; IconFilename: "{app}\keel.ico"; Tasks: desktopicon
+Name: "{autoprograms}\Keel"; Filename: "{app}\keel.exe"
+Name: "{autodesktop}\Keel"; Filename: "{app}\keel.exe"; Tasks: desktopicon
 
 [Run]
 ; Installs or updates Microsoft's Visual C++ runtime; does nothing if a newer

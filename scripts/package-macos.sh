@@ -52,11 +52,24 @@ fi
 # Swap "-" for a "Developer ID Application" identity once there is one.
 codesign --force --deep --sign - "$APP"
 
-# Disk image with an Applications shortcut for drag-to-install.
+# Disk image with an Applications shortcut for drag-to-install, and Keel's
+# icon on the opened disk. The icon needs a Finder flag on the disk itself,
+# so the image is made writable, mounted, flagged, then compressed.
 STAGE="$WORK/dmg"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "Keel" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+cp "$ROOT/packaging/macos/Keel.icns" "$STAGE/.VolumeIcon.icns"
+RW="$WORK/keel-rw.dmg"
+MOUNT="$WORK/mount"
+hdiutil create -volname "Keel" -srcfolder "$STAGE" -ov -format UDRW "$RW" >/dev/null
+mkdir -p "$MOUNT"
+hdiutil attach "$RW" -nobrowse -noautoopen -mountpoint "$MOUNT" >/dev/null
+# SetFile comes with Xcode's tools; without it, set the same flag directly.
+SetFile -a C "$MOUNT" 2>/dev/null ||
+  xattr -wx com.apple.FinderInfo 0000000000000000040000000000000000000000000000000000000000000000 "$MOUNT"
+hdiutil detach "$MOUNT" >/dev/null
+hdiutil convert "$RW" -format UDZO -ov -o "$DMG" >/dev/null
+rm -f "$RW"
 
 echo "Built $DMG"

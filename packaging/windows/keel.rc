@@ -1,0 +1,34 @@
+// Resources built into keel.exe: the icon Explorer, the taskbar and
+// shortcuts show, and the version details Task Manager and Properties show.
+// It's a template: the release workflow fills in @VERSION@ (like 0.1.0)
+// and @VERSION_NUM@ (four numbers, like 0,1,0,0), then MinGW's windres
+// turns it into cmd/keel/rsrc_windows_amd64.syso, which go build links in:
+//   windres --include-dir packaging/windows -i dist/keel.rc -O coff -o cmd/keel/rsrc_windows_amd64.syso
+
+1 ICON "keel.ico"
+
+1 VERSIONINFO
+FILEVERSION @VERSION_NUM@
+PRODUCTVERSION @VERSION_NUM@
+FILEOS 0x40004 // VOS_NT_WINDOWS32
+FILETYPE 0x1   // VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0" // US English, Unicode
+    BEGIN
+      VALUE "CompanyName", "Kody Verhulp"
+      VALUE "FileDescription", "Keel"
+      VALUE "FileVersion", "@VERSION@"
+      VALUE "InternalName", "keel"
+      VALUE "LegalCopyright", "Kody Verhulp"
+      VALUE "OriginalFilename", "keel.exe"
+      VALUE "ProductName", "Keel"
+      VALUE "ProductVersion", "@VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
