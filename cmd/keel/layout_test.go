@@ -60,3 +60,16 @@ func TestTrayNameFitsTheSystem(t *testing.T) {
 		}
 	}
 }
+
+// The activity log is always visible: however short the window gets, the
+// log keeps its room and only the services shrink and scroll.
+func TestActivityAlwaysVisible(t *testing.T) {
+	_, w := withAllParts(t, fyne.NewSize(820, 720))
+	smallest := w.Content().MinSize().Height // the real window can't get shorter
+	for _, h := range []float32{smallest, 600, 720, 900} {
+		u, _ := withAllParts(t, fyne.NewSize(820, h))
+		if got := u.logList.Size().Height; got < 100 {
+			t.Errorf("window %.0f high: the activity log is %.0f high", h, got)
+		}
+	}
+}
