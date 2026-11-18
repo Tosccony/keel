@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -80,7 +81,7 @@ func TestInstallZipAndTarGz(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(filepath.Join(dir, "jre", "bin", "java"))
-	if err != nil || info.Mode().Perm()&0o100 == 0 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 { // Windows has no executable bit
 		t.Errorf("java should be executable: %v %v", info.Mode(), err)
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".download-*")); len(left) > 0 {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -35,7 +36,8 @@ func TestSettingsSurviveARestart(t *testing.T) {
 	if !regexp.MustCompile(`^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$`).MatchString(pass) {
 		t.Errorf("password %q isn't three groups of four", pass)
 	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+	// Windows has no file modes (Go reports 0666); its per-user folders keep the file private there.
+	if info, err := os.Stat(path); runtime.GOOS != "windows" && (err != nil || info.Mode().Perm() != 0o600) {
 		t.Errorf("the settings file holds a password, so only its owner should read it: %v %v", info.Mode(), err)
 	}
 }

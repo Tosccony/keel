@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +40,9 @@ func TestStartCatchesSetupMistakes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && strings.HasPrefix(tt.name, "socket") {
+				t.Skip("Windows has no socket path limit, so Keel doesn't check it there")
+			}
 			err := tt.s.Start(context.Background())
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("got %v, want an error containing %q", err, tt.want)
@@ -261,6 +265,11 @@ var template struct {
 	err  error
 }
 
+// testNoTLS runs the test servers without TLS on Windows on ARM, as Keel
+// does there (see Server.NoTLS): the x64 MariaDB in Microsoft's emulator
+// aborts while setting TLS up.
+var testNoTLS = os.Getenv("KEEL_TEST_NO_TLS") != "" || emulatedOnARM()
+
 // newTestServer returns an unstarted Server with a fresh data folder and a
 // journal that says it stopped cleanly.
 func newTestServer(t *testing.T) *Server {
@@ -284,8 +293,7 @@ func newTestServer(t *testing.T) *Server {
 		Port:    freePort(t),
 		Socket:  shortSocketPath(t, dir),
 		LogFile: filepath.Join(dir, "error.log"),
-		// For running these tests on Windows on ARM (see Server.NoTLS).
-		NoTLS: os.Getenv("KEEL_TEST_NO_TLS") != "",
+		NoTLS:   testNoTLS,
 	}
 	if err := copyTree(filepath.Join(template.dir, "data"), s.DataDir); err != nil {
 		t.Fatal(err)
@@ -310,7 +318,7 @@ func startTestServer(t *testing.T) *Server {
 // sameServer returns a new Server with the same settings, like a second
 // Keel window or a keel-lab run.
 func sameServer(s *Server) *Server {
-	return &Server{BinDir: s.BinDir, DataDir: s.DataDir, Port: s.Port, Socket: s.Socket, LogFile: s.LogFile}
+	return &Server{BinDir: s.BinDir, DataDir: s.DataDir, Port: s.Port, Socket: s.Socket, LogFile: s.LogFile, NoTLS: s.NoTLS}
 }
 
 // shortSocketPath keeps socket paths under macOS's limit even when the
@@ -318,7 +326,7 @@ func sameServer(s *Server) *Server {
 func shortSocketPath(t *testing.T, dir string) string {
 	t.Helper()
 	socket := filepath.Join(dir, "s")
-	if len(socket) <= maxSocketPath-3 {
+	if runtime.GOOS == "windows" || len(socket) <= maxSocketPath-3 { // no socket length limit (or /tmp) on Windows
 		return socket
 	}
 	short, err := os.MkdirTemp("/tmp", "keel-")

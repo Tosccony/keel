@@ -23,6 +23,7 @@ func TestInitCreatesWorkingDataFolder(t *testing.T) {
 		Port:    freePort(t),
 		Socket:  shortSocketPath(t, dir),
 		LogFile: filepath.Join(dir, "error.log"),
+		NoTLS:   testNoTLS,
 	}
 	if err := s.Init(context.Background()); err != nil {
 		t.Fatalf("Init: %v", err)
