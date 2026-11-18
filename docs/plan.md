@@ -51,6 +51,16 @@ offers, and must do each part more safely and more simply.
 
 Each step ships with tests and is committed on its own.
 
+## 1.0.1: moving from XAMPP with nothing to change
+
+Decided 2026-11-18: a project that ran on XAMPP should run on Keel as it is.
+
+- **Web on port 80 and HTTPS on 443**, like XAMPP, on Windows and macOS (neither needs admin rights for them), falling back to 8080 and 8443 only when something else holds them. Linux keeps 8080, since ports below 1024 need root there. Links, redirects and WordPress or Laravel site URLs that say `http://localhost/...` then keep working.
+- **Tomcat on 8080**, like XAMPP, once the web server is on 80.
+- **Deprecation notices hidden by default** (`E_ALL & ~E_DEPRECATED`), so code that ran cleanly on XAMPP's PHP 8.2 doesn't print warnings on 8.4; `custom.ini` can turn them back on.
+- **"Moving from XAMPP" in the README:** point Keel at `C:\xampp\htdocs`, export databases in XAMPP's phpMyAdmin and import them in Keel's, stop XAMPP first, and Keel answers only this computer (XAMPP also answers other devices).
+- Maybe: the mail catcher on port 25 on Windows, for SMTP code set to XAMPP's Mercury.
+
 ## After 1.0
 
 From the security review (2026-11-18). Each one matters most on a computer that several people use at once.
