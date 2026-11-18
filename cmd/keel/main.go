@@ -44,6 +44,13 @@ func main() {
 	a.Settings().SetTheme(keelTheme{})
 	a.SetIcon(appIcon)
 	w := a.NewWindow("Keel")
+	// One Keel at a time: opening it again shows the window that's running.
+	release, first := oneKeel(opts.Home, func() { fyne.Do(func() { w.Show(); w.RequestFocus() }) })
+	if !first {
+		fmt.Println("Keel is already running, so its window was brought forward.")
+		return
+	}
+	defer release()
 	server := opts.Server()
 	u := newUI(w, server)
 	u.prepare = opts.Prepare

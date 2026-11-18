@@ -213,6 +213,9 @@ Repair works even when MariaDB won't start. These cases use real MariaDB and the
 | 174 | A web page posting a form to the mail catcher's SMTP port can't plant mail: the session ends at the HTTP request line | `TestHTTPRequestIsntMail` |
 | 175 | A portable Keel removes its Perl registration from the Windows account when the web server stops, and leaves an installed Keel's or another program's alone | `TestForgetPerlOnlyRemovesItsOwn` (Windows tests workflow) |
 | 176 | Like XAMPP on Windows: the web server on 80 and 443 and Tomcat on 8080 (macOS and Linux keep 8080, 8443 and 8081); addresses shown without `:80` or `:443`; PHP hides deprecation notices | `TestDefaultPortsLikeXAMPP`, `TestURL`, `TestServesPHP` |
+| 177 | The activity log keeps room for about five lines at the size Keel opens at, with every service shown; in a short window the services scroll instead, and a tall window shows every service and gives the rest to the log | `TestActivityShowsAtOpeningSize`, `TestTallWindowShowsEveryServiceAndMoreActivity` |
+| 178 | One Keel at a time per Keel folder: opening it again brings the running window forward instead of starting a second; a browser reaching that port can't; a new Keel runs once the first quits | `TestOnlyOneKeel` |
+| 179 | Messages about the tray name only this computer's (the menu bar on a Mac, the system tray by the clock on Windows) | `TestTrayNameFitsTheSystem` |
 
 ## Still to cover
 

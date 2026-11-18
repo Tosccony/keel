@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"runtime"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -43,7 +44,7 @@ func (u *ui) setUpTray(a fyne.App) {
 		u.win.Hide()
 		if !told {
 			told = true
-			u.log(info, "Keel is still running in the tray (the menu bar on a Mac). Choose Quit there to close it.")
+			u.log(info, "Keel is still running in "+trayName(runtime.GOOS)+". Choose Quit there to close it.")
 		}
 	})
 }
@@ -102,14 +103,14 @@ func (u *ui) showSettings() {
 		}
 	})
 	signIn.SetChecked(setup.StartsAtSignIn())
-	tray := widget.NewCheck("Keep running in the tray when the window closes", func(on bool) {
+	tray := widget.NewCheck("Keep running in "+trayName(runtime.GOOS)+" when the window closes", func(on bool) {
 		if err := st.SetQuitOnClose(!on); err != nil {
 			u.log(bad, "Couldn't save that: "+err.Error())
 		}
 	})
 	tray.SetChecked(!st.QuitOnClose())
 
-	hint := muted("At sign-in, Keel starts in the tray and starts the parts set to \"Start when Keel opens\" (each card's menu).")
+	hint := muted("At sign-in, Keel starts in " + trayName(runtime.GOOS) + " and starts the parts set to \"Start when Keel opens\" (each card's menu).")
 	hint.Wrapping = fyne.TextWrapWord
 	if setup.Portable() != "" { // its drive may not be there, or have another letter, at the next sign-in
 		signIn.Hide()
@@ -125,4 +126,16 @@ func (u *ui) showSettings() {
 		hint,
 	))
 	dialog.NewCustom("Settings", "Done", content, u.win).Show()
+}
+
+// trayName is what each system calls the place Keel's icon sits, so
+// messages name only the one on this computer.
+func trayName(goos string) string {
+	switch goos {
+	case "darwin":
+		return "the menu bar"
+	case "windows":
+		return "the system tray (by the clock)"
+	}
+	return "the system tray"
 }

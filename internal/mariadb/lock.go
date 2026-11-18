@@ -43,3 +43,22 @@ func (s *Server) lock() (unlock func(), err error) {
 		f.Close()
 	}, nil
 }
+
+// LockPath takes an exclusive lock on any file without waiting, the same
+// way lock does for the data folder. Keel's window uses it so only one
+// window runs per Keel folder. taken is true when another process holds
+// it; the OS drops the lock when its holder exits or crashes.
+func LockPath(path string) (unlock func(), taken bool, err error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		return nil, errors.Is(err, errLocked), err
+	}
+	return func() {
+		unlockFile(f)
+		f.Close()
+	}, false, nil
+}

@@ -30,8 +30,9 @@ import (
 type ui struct {
 	*window // the activity log and dialogs, shared with the other parts
 
-	server *mariadb.Server
-	mu     sync.Mutex
+	server   *mariadb.Server
+	mu       sync.Mutex
+	services *container.Scroll // the service cards, which scroll in a short window
 
 	busy       bool // a start or stop is in progress
 	pidNow     int  // the PID last shown; 0 means stopped
@@ -135,14 +136,44 @@ func (u *ui) content() fyne.CanvasObject {
 			cards = append(cards, p.object())
 		}
 	}
-	top := vstack(10,
-		vstack(0, sectionTitle("Services"), vstack(8, cards...)),
-		activityHead,
-	)
+	// A little room on each side, so scrolling doesn't clip the cards' borders.
+	edge := func(o fyne.CanvasObject) fyne.CanvasObject {
+		return container.New(layout.NewCustomPaddedLayout(0, 2, 2, 2), o)
+	}
+	u.services = container.NewVScroll(edge(vstack(0, sectionTitle("Services"), vstack(8, cards...))))
 	logPanel := newCard(container.NewThemeOverride(u.logList, compactTheme{fyne.CurrentApp().Settings().Theme()}), 4)
-	body := container.New(layout.NewCustomPaddedLayout(12, 16, 18, 18),
-		container.NewBorder(top, nil, nil, nil, logPanel))
+	activity := edge(container.NewBorder(container.New(layout.NewCustomPaddedLayout(10, 0, 0, 0), activityHead), nil, nil, nil, logPanel))
+	body := container.New(layout.NewCustomPaddedLayout(12, 14, 16, 16),
+		container.New(servicesAbove{u.services, minActivity}, u.services, activity))
 	return container.NewBorder(u.header(), u.statusBar(), nil, nil, body)
+}
+
+// minActivity is the least height the activity section gets: its heading
+// and about five lines of the log.
+const minActivity = 180
+
+// servicesAbove puts the service cards above the activity log. The cards
+// get their full height while the window has room for it and minActivity
+// for the log; in a shorter window they scroll, so the log never shrinks
+// out of sight. Height beyond what the cards need goes to the log.
+type servicesAbove struct {
+	services *container.Scroll
+	activity float32
+}
+
+func (l servicesAbove) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(
+		fyne.Max(objs[0].MinSize().Width, objs[1].MinSize().Width),
+		objs[0].MinSize().Height+fyne.Max(l.activity, objs[1].MinSize().Height))
+}
+
+func (l servicesAbove) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	bottom := fyne.Max(l.activity, objs[1].MinSize().Height)
+	top := fyne.Max(0, fyne.Min(l.services.Content.MinSize().Height, size.Height-bottom))
+	objs[0].Move(fyne.NewPos(0, 0))
+	objs[0].Resize(fyne.NewSize(size.Width, top))
+	objs[1].Move(fyne.NewPos(0, top))
+	objs[1].Resize(fyne.NewSize(size.Width, size.Height-top))
 }
 
 func (u *ui) header() fyne.CanvasObject {
