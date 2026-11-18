@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -109,7 +110,7 @@ func (w *webService) OpenURL() string {
 	if w.server == nil {
 		return ""
 	}
-	return fmt.Sprintf("http://localhost:%d/", w.server.Port)
+	return web.URL("http", w.server.Port)
 }
 
 func (w *webService) Detail() string {
@@ -125,7 +126,7 @@ func (w *webService) Detail() string {
 		versions += "  ·  PHP " + w.php
 	}
 	w.mu.Unlock()
-	return fmt.Sprintf("http://localhost:%d%s", w.server.Port, versions)
+	return strings.TrimSuffix(web.URL("http", w.server.Port), "/") + versions
 }
 
 func (w *webService) Start(ctx context.Context) (string, error) {
@@ -166,14 +167,14 @@ func (w *webService) Menu() []*fyne.MenuItem {
 		return it
 	}
 	pma := fyne.NewMenuItem("phpMyAdmin", func() {
-		if link, err := url.Parse(fmt.Sprintf("http://localhost:%d/phpmyadmin/", w.server.Port)); err == nil {
+		if link, err := url.Parse(web.URL("http", w.server.Port) + "phpmyadmin/"); err == nil {
 			fyne.CurrentApp().OpenURL(link)
 		}
 	})
 	pma.Icon = theme.StorageIcon()
 	pma.Disabled = w.opts.PHPMyAdmin() == ""
 	https := fyne.NewMenuItem(fmt.Sprintf("Open with HTTPS (port %d)", w.server.HTTPSPort), func() {
-		if link, err := url.Parse(fmt.Sprintf("https://localhost:%d/", w.server.HTTPSPort)); err == nil {
+		if link, err := url.Parse(web.URL("https", w.server.HTTPSPort)); err == nil {
 			fyne.CurrentApp().OpenURL(link)
 		}
 	})

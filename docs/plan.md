@@ -12,7 +12,7 @@ offers, and must do each part more safely and more simply.
 | Extras | All of XAMPP's: a mail catcher (in place of Mercury), Perl, an FTP server, and Tomcat |
 | Websites folder (XAMPP's htdocs) | Asked on first run; the default is `Documents/Keel/htdocs` on every system |
 | Portable | A Windows zip (`Keel-Portable-x64.zip`) for external drives. `portable.txt` beside `keel.exe` keeps the data (`Keel\data`) and the websites (`Keel\htdocs`) in that folder, a websites folder inside it is saved relative so a new drive letter doesn't matter, and the Visual C++ runtime travels with it. No install, no admin rights |
-| Ports | Web 8080 (HTTPS 8443), MariaDB 3306, mail 1025 (inbox page 8025), FTP 2121, Tomcat 8081. Each moves to the next free port if taken, says which program had it, and remembers the new port |
+| Ports | Web 80 (HTTPS 443) and Tomcat 8080 on Windows, like XAMPP; web 8080 (HTTPS 8443) and Tomcat 8081 on macOS and Linux, where a normal user can't take ports below 1024 for 127.0.0.1 alone. MariaDB 3306, mail 1025 (inbox page 8025), FTP 2121. Each moves to the next free port if taken, says which program had it, and remembers the new port |
 
 ## XAMPP's parts, and Keel's
 
@@ -45,20 +45,20 @@ offers, and must do each part more safely and more simply.
 4. **Bundled runtimes and installers.** ✅ MariaDB, Apache, PHP and phpMyAdmin are built and tested for all three systems in CI (`mariadb.yml`, `web.yml`). ✅ The installers include them (`scripts/fetch-runtimes.sh`), with the Visual C++ runtime on Windows. ✅ The runtime builds are published as pre-releases (`mariadb-11.8.9`, `web-2.4.70-php8.4.27`), and v1.0.0 is Keel's first release with them inside.
 5. ✅ **Perl** and **Tomcat**, downloaded when first turned on.
 6. **Control-panel extras.** ✅ Ports view, Terminal, logs in each menu, autostart, the tray icon, opening at sign-in, Settings. ✅ A system shutdown or sign-out now counts as a clean stop when MariaDB's own log confirms it, which covers most of what the background service was for.
-7. **Loose ends.** ✅ Windows on ARM (MariaDB runs without TLS there). ✅ A root password set by the student no longer gets in Keel's way: Keel logs in with its own account, and stops MariaDB through its shutdown event on Windows if even that fails. ✅ The `mariadb` command in Keel's terminal reaches Keel's MariaDB. ✅ HTTPS on port 8443 with a certificate Keel makes for this computer (browsers warn once, as with XAMPP's). ✅ `mariadb-upgrade` runs by itself after an update brings a newer MariaDB.
+7. **Loose ends.** ✅ Windows on ARM (MariaDB runs without TLS there). ✅ A root password set by the student no longer gets in Keel's way: Keel logs in with its own account, and stops MariaDB through its shutdown event on Windows if even that fails. ✅ The `mariadb` command in Keel's terminal reaches Keel's MariaDB. ✅ HTTPS (port 443 on Windows, 8443 elsewhere) with a certificate Keel makes for this computer (browsers warn once, as with XAMPP's). ✅ `mariadb-upgrade` runs by itself after an update brings a newer MariaDB.
 
 8. **Portable, icons and Windows checks.** ✅ The portable Windows zip. ✅ `keel.exe` carries the Keel icon and version details; the installer adds a desktop icon by default; the macOS disk image shows the Keel icon. ✅ Keel's tests run on Windows x64 and Windows on ARM on every push, and every release is installed, and run portable from an exFAT drive, on a Windows machine before it's published.
 
 Each step ships with tests and is committed on its own.
 
-## 1.0.1: moving from XAMPP with nothing to change
+## Moving from XAMPP with nothing to change (in 1.0.0)
 
-Decided 2026-11-18: a project that ran on XAMPP should run on Keel as it is.
+Decided 2026-11-18: a project that ran on XAMPP should run on Keel as it is. First planned for 1.0.1, then brought into 1.0.0.
 
-- **Web on port 80 and HTTPS on 443**, like XAMPP, on Windows and macOS (neither needs admin rights for them), falling back to 8080 and 8443 only when something else holds them. Linux keeps 8080, since ports below 1024 need root there. Links, redirects and WordPress or Laravel site URLs that say `http://localhost/...` then keep working.
-- **Tomcat on 8080**, like XAMPP, once the web server is on 80.
-- **Deprecation notices hidden by default** (`E_ALL & ~E_DEPRECATED`), so code that ran cleanly on XAMPP's PHP 8.2 doesn't print warnings on 8.4; `custom.ini` can turn them back on.
-- **"Moving from XAMPP" in the README:** point Keel at `C:\xampp\htdocs`, export databases in XAMPP's phpMyAdmin and import them in Keel's, stop XAMPP first, and Keel answers only this computer (XAMPP also answers other devices).
+- ✅ **Web on port 80 and HTTPS on 443 on Windows**, like XAMPP; Windows lets any user take them on 127.0.0.1. If another program holds one, Keel moves to the next free port and says which program had it. Links, redirects and WordPress or Laravel site URLs that say `http://localhost/...` keep working, and Keel shows addresses without `:80`. macOS and Linux keep 8080 and 8443: macOS lets a normal user take ports below 1024 only on every network card (checked on macOS 27), and Keel answers this computer alone.
+- ✅ **Tomcat on 8080** on Windows, like XAMPP.
+- ✅ **Deprecation notices hidden by default** (`E_ALL & ~E_DEPRECATED`), so code that ran cleanly on XAMPP's PHP 8.2 doesn't print warnings on 8.4; `custom.ini` can turn them back on.
+- ✅ **"Moving from XAMPP" in the README:** point Keel at `C:\xampp\htdocs`, export databases in XAMPP's phpMyAdmin and import them in Keel's, stop XAMPP first, and Keel answers only this computer (XAMPP also answers other devices).
 - Maybe: the mail catcher on port 25 on Windows, for SMTP code set to XAMPP's Mercury.
 
 ## After 1.0

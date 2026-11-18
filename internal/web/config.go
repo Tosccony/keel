@@ -143,7 +143,7 @@ const customConf = `# Your own Apache settings. Keel never changes this file.
 # It's read last, so what you put here wins. Keel checks it before
 # starting Apache and shows any mistake.
 #
-# For example, a site at http://localhost:8080/blog served from elsewhere:
+# For example, a site at http://localhost/blog served from elsewhere:
 #   Alias /blog "/path/to/blog"
 #   <Directory "/path/to/blog">
 #       AllowOverride All
@@ -157,7 +157,10 @@ var phpIni = template.Must(template.New("php.ini").Parse(`; Written by Keel each
 ; Show every error in the page: this is a computer for learning.
 display_errors = On
 display_startup_errors = On
-error_reporting = E_ALL
+; Like XAMPP, deprecation notices are hidden, so code that ran cleanly on
+; XAMPP's PHP 8.2 doesn't print warnings on 8.4. To see them, put
+; error_reporting = E_ALL in custom.ini.
+error_reporting = E_ALL & ~E_DEPRECATED
 log_errors = On
 error_log = "{{.Logs}}/php-errors.log"
 

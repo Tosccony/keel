@@ -3,7 +3,8 @@
 A local web stack for Windows, macOS and Linux: Apache, PHP, MariaDB and phpMyAdmin, run from one small control window.
 
 - **Stops the database cleanly.** It asks MariaDB to shut down and waits, instead of killing the process.
-- **Picks a free port on its own.** It starts on 8080. If that port is taken, it moves to the next free one and tells you.
+- **Works like XAMPP.** On Windows your sites are at `http://localhost/`, phpMyAdmin at `http://localhost/phpmyadmin`, and MariaDB's root has no password. On macOS and Linux it's `http://localhost:8080/`: there only an administrator can use port 80 without also opening it to the network.
+- **Picks a free port on its own.** If a port is taken, it moves to the next free one and tells you which program had it.
 - **No accounts.** No sign-in, no telemetry.
 
 > **Everything XAMPP offers is in the downloads:** Apache with PHP 8.4, MariaDB (with crash-safe stopping, Repair, Back up and Restore), phpMyAdmin, a mail catcher, an FTP server, Tomcat and Perl. Tomcat and Perl download the first time you turn them on. See [docs/plan.md](docs/plan.md) for what's next.
@@ -57,6 +58,20 @@ Everything stays in that folder: your databases in `Keel\data` and your websites
 - "Open Keel when I sign in" isn't offered in the portable version, because the drive might not be plugged in.
 - If you turn on Perl scripts, Keel adds a small entry for `.pl` and `.cgi` files to your Windows account, and removes it when the web server stops.
 
+### Moving from XAMPP
+
+Projects that ran on XAMPP run on Keel as they are:
+
+1. **Stop XAMPP first**, or quit its control panel. If XAMPP's Apache or MySQL still holds port 80 or 3306, Keel moves to the next free port and tells you, and links that say `http://localhost/` would still reach XAMPP.
+2. **Use your XAMPP websites folder.** When Keel asks where your websites live, choose `C:\xampp\htdocs`, or change it later in **Settings**. Nothing needs moving.
+3. **Bring your databases across once.** In XAMPP's phpMyAdmin, export each database. Then, in Keel's phpMyAdmin (`http://localhost/phpmyadmin`), import it. MariaDB's root has no password, like XAMPP, so `new mysqli("localhost", "root", "", "your_database")` keeps working.
+4. **Your own settings:** PHP settings go in `custom.ini` and Apache settings in `custom.conf`. Open them with **PHP settings** and **Apache settings** in the web server's menu in Keel. XAMPP's `php.ini` and `httpd.conf` changes don't carry over by themselves.
+
+Two differences to know:
+
+- PHP is 8.4, newer than XAMPP's 8.2. Like XAMPP, Keel hides deprecation notices, so pages that ran cleanly don't fill up with warnings. To see them, put `error_reporting = E_ALL` in `custom.ini`.
+- Keel answers only this computer. XAMPP also answers other devices on your network, such as a phone you test with. Keel doesn't, so other people on the network can't reach your sites or phpMyAdmin.
+
 ## Releasing
 
 GitHub Actions builds every release (`.github/workflows/release.yml`).
@@ -71,7 +86,7 @@ GitHub Actions builds every release (`.github/workflows/release.yml`).
 
 3. Actions builds the Windows `.exe` and portable `.zip`, the macOS `.dmg`, and the Linux `.deb`, `.rpm` and `.tar.gz`. On a Windows machine it installs the `.exe` and runs the portable `.zip` from an exFAT drive, and checks that PHP, MariaDB and phpMyAdmin work in both. It then adds `SHA256SUMS.txt` and publishes a GitHub release. The "latest" download links above then point to the new release automatically.
 
-The installers take MariaDB, Apache, PHP and phpMyAdmin from the `mariadb-*` and `web-*` pre-releases. After changing a version in `packaging/*/*.env`, run the MariaDB or Web workflow with **publish** ticked before tagging.
+The installers take MariaDB, Apache, PHP and phpMyAdmin from the `mariadb-*` and `web-*` pre-releases. After changing a version in `packaging/*/*.env`, run the MariaDB or Web workflow with **publish** ticked before tagging. Then copy the new archives' sums from that release's `SHA256SUMS.txt` into the `*_RUNTIME_SHA256_*` lines in the same `.env` files: the release build only accepts downloads that match them.
 
 Tags with a hyphen, like `v0.2.0-beta.1`, become pre-releases and don't replace "latest".
 

@@ -66,6 +66,16 @@ func (s *Server) run() string      { return filepath.Join(s.Folder, "run") }
 func (s *Server) tmp() string      { return filepath.Join(s.Folder, "tmp") }
 func (s *Server) sessions() string { return filepath.Join(s.Folder, "tmp", "sessions") }
 
+// URL is the address of a page this computer serves, like
+// http://localhost/ or https://localhost:8443/. The port is left out when
+// it's the scheme's own (80 for http, 443 for https), as XAMPP's are.
+func URL(scheme string, port int) string {
+	if (scheme == "http" && port == 80) || (scheme == "https" && port == 443) {
+		return scheme + "://localhost/"
+	}
+	return fmt.Sprintf("%s://localhost:%d/", scheme, port)
+}
+
 // ErrorLog is Apache's error log; PHPErrorLog is PHP's.
 func (s *Server) ErrorLog() string    { return filepath.Join(s.logs(), "apache-error.log") }
 func (s *Server) PHPErrorLog() string { return filepath.Join(s.logs(), "php-errors.log") }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -24,15 +25,29 @@ const (
 
 // DefaultPorts are where each part starts. MovePort moves on from them if
 // another program holds one.
-var DefaultPorts = map[string]int{
-	PartMariaDB: DefaultPort,
-	PartWeb:     8080,
-	PartHTTPS:   8443,
-	PartPHP:     9000,
-	PartMail:    1025,
-	PartMailWeb: 8025,
-	PartFTP:     2121,
-	PartTomcat:  8081,
+var DefaultPorts = defaultPorts(runtime.GOOS)
+
+// defaultPorts puts the web server on 80 and 443 and Tomcat on 8080 on
+// Windows, like XAMPP, so links that say http://localhost/ keep working.
+// Windows lets any user take those ports on 127.0.0.1. macOS and Linux
+// don't: macOS allows ports below 1024 only on every network card, and
+// Keel answers this computer alone, so there the web server starts on
+// 8080 and 8443, and Tomcat on 8081.
+func defaultPorts(goos string) map[string]int {
+	web, https, tomcat := 80, 443, 8080
+	if goos != "windows" {
+		web, https, tomcat = 8080, 8443, 8081
+	}
+	return map[string]int{
+		PartMariaDB: DefaultPort,
+		PartWeb:     web,
+		PartHTTPS:   https,
+		PartPHP:     9000,
+		PartMail:    1025,
+		PartMailWeb: 8025,
+		PartFTP:     2121,
+		PartTomcat:  tomcat,
+	}
 }
 
 // Settings are the choices Keel keeps between runs, in keel-settings.json

@@ -212,6 +212,7 @@ Repair works even when MariaDB won't start. These cases use real MariaDB and the
 | 173 | phpMyAdmin (which logs in as root by itself) refuses requests addressed to any host but localhost, 127.0.0.1 or ::1, so a website using DNS rebinding can't reach it | `TestPHPMyAdminRefusesOtherHosts`, `scripts/test-windows-package.sh` |
 | 174 | A web page posting a form to the mail catcher's SMTP port can't plant mail: the session ends at the HTTP request line | `TestHTTPRequestIsntMail` |
 | 175 | A portable Keel removes its Perl registration from the Windows account when the web server stops, and leaves an installed Keel's or another program's alone | `TestForgetPerlOnlyRemovesItsOwn` (Windows tests workflow) |
+| 176 | Like XAMPP on Windows: the web server on 80 and 443 and Tomcat on 8080 (macOS and Linux keep 8080, 8443 and 8081); addresses shown without `:80` or `:443`; PHP hides deprecation notices | `TestDefaultPortsLikeXAMPP`, `TestURL`, `TestServesPHP` |
 
 ## Still to cover
 

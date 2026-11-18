@@ -97,6 +97,7 @@ echo "tz=", date_default_timezone_get(), "\n";
 echo "upload=", ini_get("upload_max_filesize"), "\n";
 echo "inbox=", $_SERVER["KEEL_MAIL_INBOX"] ?? "", "\n";
 echo "mysqli=", extension_loaded("mysqli") ? "yes" : "no", "\n";
+echo "deprecations=", (error_reporting() & E_DEPRECATED) ? "shown" : "hidden", "\n";
 `), 0o644)
 	os.MkdirAll(filepath.Join(s.Sites, "shop"), 0o755)
 	os.WriteFile(filepath.Join(s.Sites, "shop", ".htaccess"), []byte("RewriteEngine On\nRewriteRule ^product/([0-9]+)$ show.php?id=$1 [L]\n"), 0o644)
@@ -111,7 +112,7 @@ echo "mysqli=", extension_loaded("mysqli") ? "yes" : "no", "\n";
 	}
 
 	code, body := get(t, s, "/")
-	for _, want := range []string{"PHP 8.", "tz=America/Halifax", "upload=64M", "inbox=http://localhost:8025/", "mysqli=yes"} {
+	for _, want := range []string{"PHP 8.", "tz=America/Halifax", "upload=64M", "inbox=http://localhost:8025/", "mysqli=yes", "deprecations=hidden"} {
 		if code != 200 || !strings.Contains(body, want) {
 			t.Errorf("GET / = %d, missing %q:\n%s", code, want, body)
 		}
@@ -278,6 +279,25 @@ func TestPHPMyAdminRefusesOtherHosts(t *testing.T) {
 		resp.Body.Close()
 		if resp.StatusCode != want {
 			t.Errorf("Host %s: %d, want %d", host, resp.StatusCode, want)
+		}
+	}
+}
+
+// Addresses read like XAMPP's: no port when it's the scheme's own.
+func TestURL(t *testing.T) {
+	for _, tt := range []struct {
+		scheme string
+		port   int
+		want   string
+	}{
+		{"http", 80, "http://localhost/"},
+		{"https", 443, "https://localhost/"},
+		{"http", 8080, "http://localhost:8080/"},
+		{"https", 8443, "https://localhost:8443/"},
+		{"http", 443, "http://localhost:443/"},
+	} {
+		if got := URL(tt.scheme, tt.port); got != tt.want {
+			t.Errorf("URL(%q, %d) = %q, want %q", tt.scheme, tt.port, got, tt.want)
 		}
 	}
 }

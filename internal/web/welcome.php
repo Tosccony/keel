@@ -3,6 +3,7 @@
 // Delete it, or replace it with your own index.php, whenever you like.
 
 $port = $_SERVER['SERVER_PORT'] ?? '80';
+$site = $port === '80' ? 'http://localhost' : 'http://localhost:' . $port; // like XAMPP's, without :80
 $inbox = $_SERVER['KEEL_MAIL_INBOX'] ?? '';
 $dbPort = (int) ($_SERVER['KEEL_MARIADB_PORT'] ?? 3306);
 
@@ -55,7 +56,7 @@ $projects = array_values(array_filter(scandir(__DIR__), function ($f) {
 <body>
 <main>
   <h1>Keel is running</h1>
-  <p class="lead">PHP <?= htmlspecialchars(PHP_VERSION) ?> on Apache, at <code>http://localhost:<?= htmlspecialchars($port) ?></code></p>
+  <p class="lead">PHP <?= htmlspecialchars(PHP_VERSION) ?> on Apache, at <code><?= htmlspecialchars($site) ?></code></p>
 
   <div class="grid">
     <div class="card">
@@ -82,7 +83,7 @@ $projects = array_values(array_filter(scandir(__DIR__), function ($f) {
 
   <h2>Your projects</h2>
   <p>Put each project in a folder next to this page. A folder called <code>shop</code> opens at
-     <code>http://localhost:<?= htmlspecialchars($port) ?>/shop</code>.</p>
+     <code><?= htmlspecialchars($site) ?>/shop</code>.</p>
   <?php if ($projects): ?>
     <ul><?php foreach ($projects as $p): ?><li><a href="/<?= rawurlencode($p) ?>/"><?= htmlspecialchars($p) ?></a></li><?php endforeach ?></ul>
   <?php else: ?>

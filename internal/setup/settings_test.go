@@ -56,6 +56,25 @@ func TestOlderSettingsFileIsRead(t *testing.T) {
 	}
 }
 
+// Like XAMPP on Windows: the web server on 80 and 443 and Tomcat on 8080.
+// macOS and Linux don't let a normal user take ports below 1024 on
+// 127.0.0.1, so they keep 8080, 8443 and 8081.
+func TestDefaultPortsLikeXAMPP(t *testing.T) {
+	for goos, want := range map[string][3]int{
+		"windows": {80, 443, 8080},
+		"darwin":  {8080, 8443, 8081},
+		"linux":   {8080, 8443, 8081},
+	} {
+		p := defaultPorts(goos)
+		if got := [3]int{p[PartWeb], p[PartHTTPS], p[PartTomcat]}; got != want {
+			t.Errorf("%s: web, HTTPS, Tomcat = %v, want %v", goos, got, want)
+		}
+		if p[PartMariaDB] != 3306 || p[PartMail] != 1025 || p[PartFTP] != 2121 {
+			t.Errorf("%s: other parts moved: %v", goos, p)
+		}
+	}
+}
+
 func TestSettingsSavedAtOnceKeepEveryChange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "keel-settings.json")
 	s := OpenSettings(path)
