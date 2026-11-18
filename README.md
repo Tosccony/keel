@@ -6,7 +6,7 @@ A local web stack for Windows, macOS and Linux: Apache, PHP, MariaDB and phpMyAd
 - **Picks a free port on its own.** It starts on 8080. If that port is taken, it moves to the next free one and tells you.
 - **No accounts.** No sign-in, no telemetry.
 
-> **Status: early.** Every part XAMPP offers is in the downloads: Apache with PHP 8.4, MariaDB (with crash-safe stopping, Repair, Back up and Restore), phpMyAdmin, a mail catcher, an FTP server, Tomcat and Perl. Tomcat and Perl download the first time you turn them on. See [docs/plan.md](docs/plan.md) for what's next.
+> **Everything XAMPP offers is in the downloads:** Apache with PHP 8.4, MariaDB (with crash-safe stopping, Repair, Back up and Restore), phpMyAdmin, a mail catcher, an FTP server, Tomcat and Perl. Tomcat and Perl download the first time you turn them on. See [docs/plan.md](docs/plan.md) for what's next.
 
 ## Install
 
@@ -63,8 +63,8 @@ GitHub Actions builds every release (`.github/workflows/release.yml`).
 2. Tag the version and push the tag:
 
    ```sh
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v1.0.1
+   git push origin v1.0.1
    ```
 
 3. Actions builds the Windows `.exe` and portable `.zip`, the macOS `.dmg`, and the Linux `.deb`, `.rpm` and `.tar.gz`. On a Windows machine it installs the `.exe` and runs the portable `.zip` from an exFAT drive, and checks that PHP, MariaDB and phpMyAdmin work in both. It then adds `SHA256SUMS.txt` and publishes a GitHub release. The "latest" download links above then point to the new release automatically.
