@@ -210,6 +210,8 @@ Repair works even when MariaDB won't start. These cases use real MariaDB and the
 | 169 | `keel.exe` carries the Keel icon and version details (Task Manager says "Keel") | Release workflow, after the build |
 | 170 | Keel's tests on Windows x64, and on Windows on ARM with the x64 build in Microsoft's emulator, on every push | `.github/workflows/windows.yml` |
 | 173 | phpMyAdmin (which logs in as root by itself) refuses requests addressed to any host but localhost, 127.0.0.1 or ::1, so a website using DNS rebinding can't reach it | `TestPHPMyAdminRefusesOtherHosts`, `scripts/test-windows-package.sh` |
+| 174 | A web page posting a form to the mail catcher's SMTP port can't plant mail: the session ends at the HTTP request line | `TestHTTPRequestIsntMail` |
+| 175 | A portable Keel removes its Perl registration from the Windows account when the web server stops, and leaves an installed Keel's or another program's alone | `TestForgetPerlOnlyRemovesItsOwn` (Windows tests workflow) |
 
 ## Still to cover
 

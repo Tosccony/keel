@@ -50,3 +50,13 @@ offers, and must do each part more safely and more simply.
 8. **Portable, icons and Windows checks.** ✅ The portable Windows zip. ✅ `keel.exe` carries the Keel icon and version details; the installer adds a desktop icon by default; the macOS disk image shows the Keel icon. ✅ Keel's tests run on Windows x64 and Windows on ARM on every push, and every release is installed, and run portable from an exFAT drive, on a Windows machine before it's published.
 
 Each step ships with tests and is committed on its own.
+
+## After 1.0
+
+From the security review (2026-11-18). Each one matters most on a computer that several people use at once.
+
+- **MariaDB's file access.** Add `--secure-file-priv` with a folder of Keel's, so another user signed in at the same time can't use root (no password, like XAMPP) to write files as the student. Course code that runs `LOAD DATA INFILE` or `SELECT ... INTO OUTFILE` on other folders would then need that folder; `LOAD DATA LOCAL INFILE` and phpMyAdmin's Import keep working. Needs a decision first.
+- **PHP-FPM on a private socket** (macOS and Linux) instead of port 9000, which any user on the computer can reach.
+- **FTP transfer ports on 127.0.0.1 only.** The FTP library opens them on every network card. Another computer still can't take over a transfer, but Windows shows a firewall prompt.
+- **Pin the sources static-php-cli downloads** when it builds PHP for macOS and Linux.
+- **Code signing** for the Windows installer and the Mac app, which also removes the first-launch warnings.

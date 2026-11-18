@@ -295,6 +295,7 @@ func webCommand(ctx context.Context, opts setup.Options, cmd string) {
 		if err := w.Stop(ctx); err != nil {
 			fail(err)
 		}
+		setup.WebStopped()
 		fmt.Println("Web server stopped.")
 	case "web-status":
 		if w.Running() {

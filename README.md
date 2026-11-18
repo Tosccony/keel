@@ -53,7 +53,9 @@ Everything stays in that folder: your databases in `Keel\data` and your websites
 
 - Use a drive formatted as **NTFS or exFAT**. FAT32 can't hold files over 4 GB, and MariaDB's files can grow past that.
 - Before you eject the drive, choose **Stop everything** in Keel's tray menu. If the drive is pulled out while MariaDB runs, Keel recovers the database the next time it starts, but stopping first is safer.
+- Don't use the portable version on a computer where other people are signed in at the same time. External drives usually have no file permissions, so others could read your databases and passwords or swap Keel's programs.
 - "Open Keel when I sign in" isn't offered in the portable version, because the drive might not be plugged in.
+- If you turn on Perl scripts, Keel adds a small entry for `.pl` and `.cgi` files to your Windows account, and removes it when the web server stops.
 
 ## Releasing
 

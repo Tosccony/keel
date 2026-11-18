@@ -241,6 +241,26 @@ func TestSMTPEdgeCases(t *testing.T) {
 	}
 }
 
+// A web page can send a form (enctype=text/plain) to the SMTP port. Its
+// body lines must not run as mail commands.
+func TestHTTPRequestIsntMail(t *testing.T) {
+	c := startCatcher(t)
+	conn, err := net.Dial("tcp", c.addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	body := "HELO evil\r\nMAIL FROM:<a@evil.example>\r\nRCPT TO:<student@example.test>\r\nDATA\r\nSubject: Reset your password\r\n\r\nhttp://evil.example/\r\n.\r\nQUIT\r\n"
+	fmt.Fprintf(conn, "POST / HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", c.SMTPPort, len(body), body)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadAll(conn); err != nil { // the catcher hangs up
+		t.Fatal(err)
+	}
+	if list, err := c.List(); err != nil || len(list) != 0 {
+		t.Fatalf("caught %d messages from an HTTP request (%v)", len(list), err)
+	}
+}
+
 func TestOldMessagesArePruned(t *testing.T) {
 	c := startCatcher(t)
 	c.Keep = 3

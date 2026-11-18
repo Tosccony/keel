@@ -103,6 +103,15 @@ func (o Options) PrepareWeb(ctx context.Context, s *web.Server, sendmail string)
 	return strings.TrimSpace(strings.Join(notes, " ")), nil
 }
 
+// WebStopped tidies up after the web server stops: a portable Keel removes
+// the Perl registration PrepareWeb made, so it leaves nothing behind on the
+// computer.
+func WebStopped() {
+	if root := Portable(); root != "" {
+		forgetPerl(root)
+	}
+}
+
 // PHPMyAdmin returns phpMyAdmin's folder: the one bundled with Keel, or in
 // a development build, phpmyadmin/ in Keel's folder (scripts/fetch-phpmyadmin.sh
 // puts it there). It's "" when there's none.

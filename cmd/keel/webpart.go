@@ -144,7 +144,11 @@ func (w *webService) Stop(ctx context.Context) error {
 	if w.server == nil {
 		return nil
 	}
-	return w.server.Stop(ctx)
+	if err := w.server.Stop(ctx); err != nil {
+		return err
+	}
+	setup.WebStopped()
+	return nil
 }
 
 func (w *webService) Menu() []*fyne.MenuItem {

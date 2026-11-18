@@ -55,6 +55,9 @@ func (c *Catcher) session(conn net.Conn) {
 			return
 		}
 		verb, arg, _ := strings.Cut(line, " ")
+		if isHTTP(verb, line) {
+			return // a web page posting to this port: its body must not run as mail commands
+		}
 		switch strings.ToUpper(verb) {
 		case "EHLO":
 			helo = arg
@@ -159,6 +162,18 @@ func (c *Catcher) auth(r *bufio.Reader, reply func(string, ...any), arg string) 
 	default:
 		reply("504 Use PLAIN or LOGIN")
 	}
+}
+
+// isHTTP reports whether a line is an HTTP request rather than SMTP. A
+// website open in the browser can send a form to 127.0.0.1:1025; without
+// this, the catcher would answer each header with an error and then run
+// the form's body lines as commands, catching mail the page made up.
+func isHTTP(verb, line string) bool {
+	switch strings.ToUpper(verb) {
+	case "GET", "POST", "PUT", "HEAD", "OPTIONS", "CONNECT", "DELETE", "PATCH":
+		return true
+	}
+	return strings.Contains(line, " HTTP/1.")
 }
 
 // readLine reads one command line without its CRLF.
